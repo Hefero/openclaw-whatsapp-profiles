@@ -147,7 +147,7 @@ export function loadConfig(): AppConfig {
   const policyPath = path.resolve(process.env.BOT_POLICY_PATH ?? './config/bot-policy.local.json');
   const codexProxyHost = process.env.CODEX_PROXY_HOST ?? '127.0.0.1';
   const codexProxyPort = process.env.CODEX_PROXY_PORT ?? '8787';
-  const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED !== 'false';
+  const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED === 'true';
   const codexProxyBaseUrl = `http://${codexProxyHost}:${codexProxyPort}/v1`;
   const proxyTranscriberProvider = process.env.CODEX_PROXY_TRANSCRIBER_PROVIDER;
   const defaultTranscriberModel =
@@ -167,9 +167,12 @@ export function loadConfig(): AppConfig {
     },
     responder: {
       baseUrl:
-        process.env.RESPONDER_BASE_URL ?? `http://${codexProxyHost}:${codexProxyPort}/v1`,
-      apiKey: process.env.RESPONDER_API_KEY ?? process.env.CODEX_PROXY_API_KEY,
-      model: process.env.RESPONDER_MODEL ?? process.env.CODEX_PROXY_MODEL ?? 'gpt-5.4',
+        process.env.RESPONDER_BASE_URL ??
+        (codexProxyEnabled ? codexProxyBaseUrl : 'https://api.openai.com/v1'),
+      apiKey: process.env.RESPONDER_API_KEY ?? (codexProxyEnabled ? process.env.CODEX_PROXY_API_KEY : undefined),
+      model:
+        process.env.RESPONDER_MODEL ??
+        (codexProxyEnabled ? process.env.CODEX_PROXY_MODEL ?? 'gpt-5.4' : 'gpt-4o-mini'),
       timeoutMs: Number(process.env.RESPONDER_TIMEOUT_MS ?? '120000')
     },
     transcriber: {

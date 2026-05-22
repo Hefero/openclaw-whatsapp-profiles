@@ -21,7 +21,7 @@ const whisperPort = Number(process.env.WHISPER_LOCAL_PORT ?? '2022');
 const proxyHealthUrl = `http://${host}:${proxyPort}/healthz`;
 const controlHealthUrl = `http://127.0.0.1:${controlPort}/healthz`;
 const hookHealthUrl = `http://127.0.0.1:${hookPort}/healthz`;
-const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED !== 'false';
+const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED === 'true';
 const whisperEnabled = process.env.WHISPER_LOCAL_ENABLED === 'true' || Boolean(readPidInfo('whisper-local'));
 
 async function statusFor(name: ManagedName): Promise<ManagedStatus> {

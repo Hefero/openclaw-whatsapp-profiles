@@ -17,7 +17,7 @@ import {
 const root = process.cwd();
 const env = { ...process.env };
 const openclawCommand = process.env.OPENCLAW_COMMAND?.trim() || 'openclaw';
-const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED !== 'false';
+const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED === 'true';
 const whisperLocalEnabled = process.env.WHISPER_LOCAL_ENABLED === 'true';
 const names: ManagedName[] = [
   ...(whisperLocalEnabled ? (['whisper-local'] as ManagedName[]) : []),

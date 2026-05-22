@@ -47,7 +47,7 @@ Import-DotEnv
 
 $openclawCommand = Get-DotEnvValue "OPENCLAW_COMMAND" "openclaw"
 $openclawCommandForCmd = if ($openclawCommand -match '\s') { "`"$openclawCommand`"" } else { $openclawCommand }
-$codexProxyEnabled = (Get-DotEnvValue "CODEX_PROXY_ENABLED" "true") -ne "false"
+$codexProxyEnabled = (Get-DotEnvValue "CODEX_PROXY_ENABLED" "false") -eq "true"
 $whisperLocalEnabled = (Get-DotEnvValue "WHISPER_LOCAL_ENABLED" "false") -eq "true"
 
 function Test-Port($port) {

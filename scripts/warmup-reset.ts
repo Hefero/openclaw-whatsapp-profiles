@@ -17,9 +17,9 @@ const names: ManagedName[] = [
 ];
 
 const ports = [
-  ...(process.env.CODEX_PROXY_ENABLED === 'false'
-    ? []
-    : [Number(process.env.CODEX_PROXY_PORT ?? '8787')]),
+  ...(process.env.CODEX_PROXY_ENABLED === 'true'
+    ? [Number(process.env.CODEX_PROXY_PORT ?? '8787')]
+    : []),
   ...(process.env.WHISPER_LOCAL_ENABLED === 'true'
     ? [Number(process.env.WHISPER_LOCAL_PORT ?? '2022')]
     : []),

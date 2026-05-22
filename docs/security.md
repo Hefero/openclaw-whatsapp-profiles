@@ -24,8 +24,8 @@ Runtime state and logs may contain contact identifiers, message ids, profile nam
 
 ## Network Exposure
 
-- Keep `codex-proxy`, `openclaw-control`, and `openclaw-worker` bound to localhost.
-- Do not expose the Codex proxy directly to the internet.
+- Keep `openclaw-control`, `openclaw-worker`, and any optional local proxy bound to localhost.
+- Do not expose `codex-proxy` directly to the internet when it is enabled.
 - If using Twilio, expose only the Twilio webhook path through a tunnel and keep signature validation enabled for non-local testing.
 - Treat `openclaw-control` as a local-only send API. It has no authentication by default.
 

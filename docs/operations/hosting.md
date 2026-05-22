@@ -42,10 +42,21 @@ npm run warmup:status
 For a long-running Linux install, validate the warmup path first, then use a process manager such as `systemd` or `pm2` to run the same underlying services explicitly:
 
 ```bash
-npm run codex-proxy
 npm run openclaw:control
 npm run openclaw:worker
 openclaw gateway run --force --allow-unconfigured
+```
+
+If `CODEX_PROXY_ENABLED=true`, also run:
+
+```bash
+npm run codex-proxy
+```
+
+If `WHISPER_LOCAL_ENABLED=true`, also run:
+
+```bash
+npm run warmup:whisper
 ```
 
 Run `npm run openclaw:install-dispatch-plugin` and `npm run openclaw:repair-config` during setup or whenever plugin/config policy changes.

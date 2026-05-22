@@ -1,8 +1,8 @@
 # Responder Provider
 
-`codex-proxy` exposes the local Codex CLI as a small OpenAI-compatible Chat Completions endpoint. The worker uses it as the responder provider.
+The worker calls an OpenAI-compatible `/chat/completions` endpoint configured by `RESPONDER_BASE_URL`, `RESPONDER_API_KEY`, and `RESPONDER_MODEL`.
 
-The worker does not require the local proxy specifically. It calls an OpenAI-compatible `/chat/completions` endpoint configured by `RESPONDER_BASE_URL`, `RESPONDER_API_KEY`, and `RESPONDER_MODEL`.
+The public/default setup is direct API key mode. `codex-proxy` is optional for users who want to back replies with a local Codex CLI session or run local Whisper transcription behind a local OpenAI-compatible endpoint.
 
 ## Endpoints
 
@@ -13,22 +13,36 @@ The worker does not require the local proxy specifically. It calls an OpenAI-com
 
 Streaming is not implemented.
 
-## Run
+## Direct API Mode
+
+Default public setup:
+
+```text
+CODEX_PROXY_ENABLED=false
+RESPONDER_BASE_URL=https://api.openai.com/v1
+RESPONDER_API_KEY=your-api-key
+RESPONDER_MODEL=gpt-4o-mini
+RESPONDER_TIMEOUT_MS=60000
+```
+
+This path does not require Codex CLI or a ChatGPT/Codex subscription. It consumes API credits from the configured provider and sends message context to that provider. Keep the API key only in `.env` or the host secret manager.
+
+## Optional Codex Proxy
+
+`codex-proxy` exposes the local Codex CLI as a small OpenAI-compatible Chat Completions endpoint.
 
 ```bash
 npm run codex-proxy
 npm run codex-proxy:test
 ```
 
-The full project stack starts it automatically through:
+The full project stack starts it automatically only when:
 
-```bash
-npm run warmup
+```text
+CODEX_PROXY_ENABLED=true
 ```
 
-## Config
-
-Default local Codex CLI proxy:
+Local Codex CLI proxy config:
 
 ```text
 CODEX_PROXY_ENABLED=true
@@ -45,7 +59,7 @@ CODEX_PROXY_CODEX_BIN=codex.cmd
 CODEX_PROXY_TRANSCRIBER_PROVIDER=off
 ```
 
-Worker responder defaults to the local proxy when `RESPONDER_*` is omitted:
+Point the responder at the proxy:
 
 ```text
 RESPONDER_BASE_URL=http://127.0.0.1:8787/v1
@@ -56,22 +70,6 @@ RESPONDER_TIMEOUT_MS=120000
 
 Keep `WHATSAPP_ASSISTANT_DISPATCH_TIMEOUT_MS` at least as high as the responder timeout. The OpenClaw dispatch hook is synchronous; if the hook times out first, the worker may finish a valid reply that OpenClaw no longer delivers.
 
-## Use a Direct API Key
-
-To bypass `codex-proxy` and use a paid OpenAI-compatible API directly, set:
-
-```text
-CODEX_PROXY_ENABLED=false
-RESPONDER_BASE_URL=https://api.openai.com/v1
-RESPONDER_API_KEY=your-api-key
-RESPONDER_MODEL=your-chat-completions-model
-RESPONDER_TIMEOUT_MS=60000
-```
-
-With `CODEX_PROXY_ENABLED=false`, `warmup` and `warmup:linux` skip the local proxy and `warmup:status` reports it as disabled. OpenClaw, `openclaw-control`, and `openclaw-worker` still start normally.
-
-The direct API path is faster and more production-like, but it consumes API credits and sends message context to the configured provider. Keep the API key only in `.env` or the host secret manager.
-
 ## Voice Transcription
 
 `codex-proxy` can also expose an OpenAI-compatible `/v1/audio/transcriptions` endpoint. It does not use `codex exec` for audio; it forwards the multipart transcription request to a configured transcription backend.
@@ -79,6 +77,7 @@ The direct API path is faster and more production-like, but it consumes API cred
 Local Whisper path:
 
 ```text
+CODEX_PROXY_ENABLED=true
 CODEX_PROXY_TRANSCRIBER_PROVIDER=local-whisper
 CODEX_PROXY_TRANSCRIBER_BASE_URL=http://127.0.0.1:2022/v1
 CODEX_PROXY_TRANSCRIBER_MODEL=base
@@ -104,6 +103,7 @@ See [Voice notes](voice-notes.md) for the full operational test path and trouble
 OpenAI transcription path:
 
 ```text
+CODEX_PROXY_ENABLED=true
 CODEX_PROXY_TRANSCRIBER_PROVIDER=openai
 CODEX_PROXY_TRANSCRIBER_API_KEY=your-transcriber-api-key
 CODEX_PROXY_TRANSCRIBER_MODEL=gpt-4o-mini-transcribe

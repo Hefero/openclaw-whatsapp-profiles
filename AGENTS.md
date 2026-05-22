@@ -19,7 +19,7 @@ npm run warmup:status
 Managed processes:
 
 - optional `whisper-local` on `127.0.0.1:2022` when `WHISPER_LOCAL_ENABLED=true`
-- `codex-proxy` on `127.0.0.1:8787`
+- optional `codex-proxy` on `127.0.0.1:8787` when `CODEX_PROXY_ENABLED=true`
 - OpenClaw gateway on `127.0.0.1:18789`
 - `openclaw-control` on `127.0.0.1:8788`
 - `openclaw-worker` inbound HTTP bridge on `127.0.0.1:8790`

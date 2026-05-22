@@ -9,18 +9,20 @@ WhatsApp voice note
   -> OpenClaw WhatsApp plugin
   -> whatsapp-policy-dispatch reply_dispatch
   -> openclaw-worker
-  -> codex-proxy /v1/audio/transcriptions
-  -> local whisper.cpp or OpenAI transcription
+  -> configured transcription provider
   -> normal guidance/responder flow
 ```
 
 `codex exec` is still used only for text reasoning. Audio is transcribed before the responder sees the message.
+
+In direct API mode, transcription can call the configured API provider directly. In local Whisper mode, transcription goes through `codex-proxy /v1/audio/transcriptions`, which forwards to `whisper.cpp`.
 
 ## Local Whisper Setup
 
 Use this path to avoid a transcription API key:
 
 ```text
+CODEX_PROXY_ENABLED=true
 CODEX_PROXY_TRANSCRIBER_PROVIDER=local-whisper
 CODEX_PROXY_TRANSCRIBER_BASE_URL=http://127.0.0.1:2022/v1
 CODEX_PROXY_TRANSCRIBER_MODEL=base
@@ -47,6 +49,21 @@ On Windows, `warmup:whisper` downloads under `data/whisper/`:
 - portable FFmpeg
 
 Those files are runtime artifacts and are ignored by Git.
+
+## Direct API Transcription
+
+If you already use direct API mode for replies, the worker can reuse `RESPONDER_API_KEY` for voice transcription:
+
+```text
+CODEX_PROXY_ENABLED=false
+RESPONDER_BASE_URL=https://api.openai.com/v1
+RESPONDER_API_KEY=your-api-key
+RESPONDER_MODEL=gpt-4o-mini
+TRANSCRIBER_BASE_URL=https://api.openai.com/v1
+TRANSCRIBER_MODEL=gpt-4o-mini-transcribe
+```
+
+Set `TRANSCRIBER_API_KEY` only if transcription should use a different key from the responder.
 
 ## Profile Config
 
