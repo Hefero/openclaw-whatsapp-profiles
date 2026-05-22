@@ -12,6 +12,11 @@
         "webSearch": false,
         "localRead": false
       },
+      "voice": {
+        "enabled": false,
+        "transcribe": true,
+        "maxAudioBytes": 26214400
+      },
       "instructions": [
         "Responda como assistente pessoal, sem parecer atendimento comercial.",
         "Quando faltar contexto, gere uma resposta curta que nao inventa detalhes."
@@ -29,6 +34,11 @@
       "tools": {
         "webSearch": false,
         "localRead": false
+      },
+      "voice": {
+        "enabled": false,
+        "transcribe": true,
+        "maxAudioBytes": 26214400
       },
       "instructions": [
         "Pode usar abreviacoes naturais.",
@@ -48,6 +58,11 @@
       "tools": {
         "webSearch": true,
         "localRead": false
+      },
+      "voice": {
+        "enabled": false,
+        "transcribe": true,
+        "maxAudioBytes": 26214400
       },
       "instructions": [
         "Responda com clareza operacional.",

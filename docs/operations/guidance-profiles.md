@@ -113,6 +113,24 @@ Profiles can opt into responder tools:
 
 Profiles default to both tools disabled. If a profile asks for current information while `webSearch=false`, it should say it cannot verify from there instead of inventing a search result.
 
+## Voice Messages
+
+Voice handling is also profile-gated:
+
+```json
+{
+  "voice": {
+    "enabled": true,
+    "transcribe": true,
+    "maxAudioBytes": 26214400
+  }
+}
+```
+
+Defaults keep `voice.enabled=false`, so wildcard contacts and groups do not get audio transcribed unless their selected profile opts in. When enabled, the OpenClaw dispatch plugin forwards audio metadata to the worker, the worker transcribes the voice note, then the normal guidance/profile flow answers the transcript.
+
+Real transcription requires `TRANSCRIBER_API_KEY` when using the default local `codex-proxy` responder path. In direct API mode (`CODEX_PROXY_ENABLED=false`), `RESPONDER_API_KEY` is reused as the transcriber key unless `TRANSCRIBER_API_KEY` is set separately.
+
 ## Conversation Context
 
 By default, the worker keeps a short local history per configured target and passes it into the next response. This avoids each reply being isolated from the previous WhatsApp message.

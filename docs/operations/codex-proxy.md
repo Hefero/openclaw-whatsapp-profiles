@@ -70,6 +70,19 @@ With `CODEX_PROXY_ENABLED=false`, `warmup` and `warmup:linux` skip the local pro
 
 The direct API path is faster and more production-like, but it consumes API credits and sends message context to the configured provider. Keep the API key only in `.env` or the host secret manager.
 
+## Voice Transcription
+
+`codex-proxy` only handles chat completions. It does not transcribe WhatsApp audio. Profile-enabled voice notes use the separate `TRANSCRIBER_*` settings:
+
+```text
+TRANSCRIBER_BASE_URL=https://api.openai.com/v1
+TRANSCRIBER_API_KEY=your-transcriber-api-key
+TRANSCRIBER_MODEL=whisper-1
+TRANSCRIBER_TIMEOUT_MS=60000
+```
+
+When `CODEX_PROXY_ENABLED=false`, the worker reuses `RESPONDER_API_KEY` for transcription unless `TRANSCRIBER_API_KEY` is set. With the default local proxy path, set `TRANSCRIBER_API_KEY` explicitly before enabling voice profiles in production.
+
 ## Guardrails
 
 For the local Codex proxy:

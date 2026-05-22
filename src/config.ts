@@ -26,6 +26,13 @@ const guidanceProfileSchema = z.object({
       localRead: z.boolean().default(false)
     })
     .default({}),
+  voice: z
+    .object({
+      enabled: z.boolean().default(false),
+      transcribe: z.boolean().default(true),
+      maxAudioBytes: z.number().int().min(1024).max(100 * 1024 * 1024).default(25 * 1024 * 1024)
+    })
+    .default({}),
   instructions: z.array(z.string()).default([]),
   boundaries: z.array(z.string()).default([]),
   maxResponseChars: z.number().int().min(80).max(4000).default(700)
@@ -114,6 +121,14 @@ export type AppConfig = {
     model: string;
     timeoutMs: number;
   };
+  transcriber: {
+    baseUrl: string;
+    apiKey?: string;
+    model: string;
+    language?: string;
+    prompt?: string;
+    timeoutMs: number;
+  };
 };
 
 const defaultPolicy: BotPolicy = policySchema.parse({});
@@ -131,6 +146,8 @@ export function loadConfig(): AppConfig {
   const policyPath = path.resolve(process.env.BOT_POLICY_PATH ?? './config/bot-policy.local.json');
   const codexProxyHost = process.env.CODEX_PROXY_HOST ?? '127.0.0.1';
   const codexProxyPort = process.env.CODEX_PROXY_PORT ?? '8787';
+  const directResponderApiKey =
+    process.env.CODEX_PROXY_ENABLED === 'false' ? process.env.RESPONDER_API_KEY : undefined;
 
   return {
     mode: botModeSchema.parse(process.env.BOT_MODE ?? 'observe'),
@@ -148,6 +165,14 @@ export function loadConfig(): AppConfig {
       apiKey: process.env.RESPONDER_API_KEY ?? process.env.CODEX_PROXY_API_KEY,
       model: process.env.RESPONDER_MODEL ?? process.env.CODEX_PROXY_MODEL ?? 'gpt-5.4',
       timeoutMs: Number(process.env.RESPONDER_TIMEOUT_MS ?? '120000')
+    },
+    transcriber: {
+      baseUrl: process.env.TRANSCRIBER_BASE_URL ?? 'https://api.openai.com/v1',
+      apiKey: process.env.TRANSCRIBER_API_KEY ?? directResponderApiKey,
+      model: process.env.TRANSCRIBER_MODEL ?? 'whisper-1',
+      language: process.env.TRANSCRIBER_LANGUAGE,
+      prompt: process.env.TRANSCRIBER_PROMPT,
+      timeoutMs: Number(process.env.TRANSCRIBER_TIMEOUT_MS ?? '60000')
     }
   };
 }

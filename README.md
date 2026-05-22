@@ -84,6 +84,8 @@ Configure profiles and targets in `config/bot-policy.local.json`. Start from `co
 
 The example policy opens inbound visibility with `allowContacts=["*"]` and `allowGroups=true`, but keeps `defaults.mode="observe"`. That means unknown chats are visible to the worker but do not generate replies unless you add a target or intentionally change the defaults.
 
+Profiles can also opt into WhatsApp voice-note transcription with `voice.enabled=true`. Defaults keep voice disabled, and transcription requires `TRANSCRIBER_API_KEY` unless you are using direct API mode.
+
 ## Manual Send
 
 ```bash

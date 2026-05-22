@@ -5,7 +5,7 @@ import path from 'node:path';
 import { pino } from 'pino';
 import { loadConfig, type AppConfig, type TargetConfig } from './config.js';
 import { decideDelivery } from './delivery-gate.js';
-import { resolveConversationContext } from './guidance.js';
+import { resolveConversationContext, resolveGuidance } from './guidance.js';
 import { decideMessageAction } from './policy.js';
 import { generateDraftReply } from './responder.js';
 import {
@@ -19,6 +19,7 @@ import {
   rememberOutbound,
   saveRuntimeState
 } from './runtime-state.js';
+import { type InboundMedia, transcribeVoiceMessage } from './transcriber.js';
 
 type InboundPayload = {
   type?: string;
@@ -37,6 +38,17 @@ type InboundMessage = {
   id: string;
   remoteJid: string;
   text: string;
+  inputKind: 'text' | 'voice' | 'media';
+  raw: InboundPayload;
+  media?: InboundMedia;
+};
+
+type InboundSeed = {
+  id: string;
+  remoteJid: string;
+  text?: string;
+  transcript?: string;
+  media?: InboundMedia;
   raw: InboundPayload;
 };
 
@@ -74,6 +86,26 @@ function registerWorkerProcess(): void {
 
 function getString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function getStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.length > 0) : [];
+}
+
+function firstString(...values: Array<unknown>): string | undefined {
+  for (const value of values) {
+    const stringValue = getString(value);
+    if (stringValue) {
+      return stringValue;
+    }
+
+    const arrayValue = getStringArray(value)[0];
+    if (arrayValue) {
+      return arrayValue;
+    }
+  }
+
+  return undefined;
 }
 
 function normalizeContact(value: string): string {
@@ -155,10 +187,40 @@ function resolveRemoteJid(payload: InboundPayload, target: TargetConfig | undefi
   return collectInboundIds(payload)[0];
 }
 
-function normalizeInbound(payload: InboundPayload, remoteJid: string): InboundMessage | undefined {
+function isMediaPlaceholder(text: string | undefined): boolean {
+  return /^<media:[a-z0-9_-]+>$/i.test(text?.trim() ?? '');
+}
+
+function isAudioPlaceholder(text: string | undefined): boolean {
+  return /^<media:audio>$/i.test(text?.trim() ?? '');
+}
+
+function collectInboundMedia(payload: InboundPayload): InboundMedia | undefined {
+  const metadata = payload.context?.metadata ?? {};
+  const mediaPath = firstString(metadata.mediaPath, metadata.MediaPath, metadata.mediaPaths, metadata.MediaPaths);
+  const mediaUrl = firstString(metadata.mediaUrl, metadata.MediaUrl, metadata.mediaUrls, metadata.MediaUrls);
+  const mediaType = firstString(metadata.mediaType, metadata.MediaType, metadata.mediaTypes, metadata.MediaTypes);
+  const mediaFileName = firstString(metadata.mediaFileName, metadata.MediaFileName, metadata.fileName);
+
+  if (!mediaPath && !mediaUrl && !mediaType && !mediaFileName) {
+    return undefined;
+  }
+
+  return {
+    path: mediaPath,
+    url: mediaUrl,
+    type: mediaType,
+    fileName: mediaFileName
+  };
+}
+
+function normalizeInboundSeed(payload: InboundPayload, remoteJid: string): InboundSeed | undefined {
   const metadata = payload.context?.metadata ?? {};
   const text = payload.context?.content?.trim();
-  if (!text) {
+  const transcript = firstString(metadata.transcript, metadata.Transcript)?.trim();
+  const media = collectInboundMedia(payload);
+
+  if (!text && !transcript && !media) {
     return undefined;
   }
 
@@ -166,13 +228,96 @@ function normalizeInbound(payload: InboundPayload, remoteJid: string): InboundMe
     getString(metadata.messageId) ??
     getString(metadata.id) ??
     getString(metadata.stanzaId) ??
-    `${payload.sessionKey ?? remoteJid}:${payload.timestamp ?? Date.now()}:${text}`;
+    `${payload.sessionKey ?? remoteJid}:${payload.timestamp ?? Date.now()}:${text ?? transcript ?? media?.path ?? media?.url ?? 'media'}`;
 
   return {
     id,
     remoteJid,
     text,
+    transcript,
+    media,
     raw: payload
+  };
+}
+
+function isAudioSeed(seed: InboundSeed): boolean {
+  return (
+    isAudioPlaceholder(seed.text) ||
+    seed.media?.type?.toLowerCase().startsWith('audio/') === true ||
+    /\.(aac|amr|flac|m4a|mp3|oga|ogg|opus|wav|webm)$/i.test(seed.media?.fileName ?? seed.media?.path ?? '')
+  );
+}
+
+function seedHasText(seed: InboundSeed): boolean {
+  return Boolean(seed.text && !isMediaPlaceholder(seed.text));
+}
+
+function fallbackVoiceText(reason: string): string {
+  return [
+    '[Audio recebido, mas nao foi possivel ouvir ou transcrever com seguranca.]',
+    `Motivo tecnico resumido: ${reason}.`,
+    'Responda de forma natural pedindo para a pessoa reenviar por texto, sem mencionar sistema, API, modelo ou automacao.'
+  ].join(' ');
+}
+
+async function resolveMessageFromSeed(
+  seed: InboundSeed,
+  config: AppConfig
+): Promise<InboundMessage | { ignored: true; reason: string }> {
+  if (seed.transcript) {
+    return {
+      id: seed.id,
+      remoteJid: seed.remoteJid,
+      text: seed.transcript,
+      inputKind: 'voice',
+      raw: seed.raw,
+      media: seed.media
+    };
+  }
+
+  if (seedHasText(seed)) {
+    return {
+      id: seed.id,
+      remoteJid: seed.remoteJid,
+      text: seed.text?.trim() ?? '',
+      inputKind: 'text',
+      raw: seed.raw,
+      media: seed.media
+    };
+  }
+
+  if (!seed.media && !isMediaPlaceholder(seed.text)) {
+    return { ignored: true, reason: 'empty message' };
+  }
+
+  if (!isAudioSeed(seed)) {
+    return { ignored: true, reason: 'non-audio media message' };
+  }
+
+  const guidance = resolveGuidance(seed.remoteJid, config.policy);
+  if (!guidance.profile.voice.enabled || !guidance.profile.voice.transcribe) {
+    return { ignored: true, reason: 'voice disabled for profile' };
+  }
+
+  const result = await transcribeVoiceMessage(seed.media ?? {}, guidance.profile, config.transcriber);
+  if (result.ok) {
+    return {
+      id: seed.id,
+      remoteJid: seed.remoteJid,
+      text: result.text,
+      inputKind: 'voice',
+      raw: seed.raw,
+      media: seed.media
+    };
+  }
+
+  return {
+    id: seed.id,
+    remoteJid: seed.remoteJid,
+    text: fallbackVoiceText(result.reason),
+    inputKind: 'voice',
+    raw: seed.raw,
+    media: seed.media
   };
 }
 
@@ -303,7 +448,9 @@ function twilioFormToInboundPayload(form: URLSearchParams): InboundPayload {
         waId: data.WaId,
         profileName: data.ProfileName,
         messageType: data.MessageType,
-        numMedia: data.NumMedia
+        numMedia: data.NumMedia,
+        mediaUrl: data.MediaUrl0,
+        mediaType: data.MediaContentType0
       }
     }
   };
@@ -343,39 +490,67 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     return { ok: true, action: 'ignored', reason: 'sender not detected' };
   }
 
-  const message = normalizeInbound(payload, remoteJid);
-  if (!message) {
+  const seed = normalizeInboundSeed(payload, remoteJid);
+  if (!seed) {
     return { ok: true, action: 'ignored', reason: 'empty message' };
   }
-  const targetLabel = target?.label ?? message.remoteJid;
+  const targetLabel = target?.label ?? seed.remoteJid;
 
-  if (isTwilioSandboxDefaultEcho(message.text)) {
+  if (seedHasText(seed) && isTwilioSandboxDefaultEcho(seed.text ?? '')) {
     logger.info(
-      { target: targetLabel, messageId: message.id },
+      { target: targetLabel, messageId: seed.id },
       'ignored twilio sandbox default echo'
     );
     return { ok: true, action: 'ignored', reason: 'twilio sandbox default echo' };
   }
 
   const state = loadRuntimeState();
-  if (hasSeen(state, message.remoteJid, message.id)) {
+  if (hasSeen(state, seed.remoteJid, seed.id)) {
     return { ok: true, action: 'ignored', reason: 'duplicate message' };
   }
 
-  if (isRecentOutbound(state, message.remoteJid, message.text)) {
-    markSeen(state, message.remoteJid, [message.id]);
+  if (seedHasText(seed) && isRecentOutbound(state, seed.remoteJid, seed.text ?? '')) {
+    markSeen(state, seed.remoteJid, [seed.id]);
     saveRuntimeState(state);
     logger.info(
-      { target: targetLabel, messageId: message.id },
+      { target: targetLabel, messageId: seed.id },
       'ignored recent outbound echo'
     );
     return { ok: true, action: 'ignored', reason: 'recent outbound echo' };
   }
 
-  markSeen(state, message.remoteJid, [message.id]);
+  markSeen(state, seed.remoteJid, [seed.id]);
   saveRuntimeState(state);
 
-  const decision = decideMessageAction(message.remoteJid, config.mode, config.policy);
+  const decision = decideMessageAction(seed.remoteJid, config.mode, config.policy);
+
+  logger.info(
+    {
+      target: targetLabel,
+      messageId: seed.id,
+      action: decision.action,
+      reasons: decision.reasons,
+      profile: decision.profile,
+      responderModel: config.responder.model,
+      inputKind: isAudioSeed(seed) ? 'voice' : seed.media ? 'media' : 'text'
+    },
+    'openclaw inbound policy decision'
+  );
+
+  if (decision.action !== 'draft' && decision.action !== 'auto') {
+    return { ok: true, action: decision.action, reasons: decision.reasons };
+  }
+
+  const resolvedMessage = await resolveMessageFromSeed(seed, config);
+  if ('ignored' in resolvedMessage) {
+    logger.info(
+      { target: targetLabel, messageId: seed.id, reason: resolvedMessage.reason },
+      'ignored inbound message after media normalization'
+    );
+    return { ok: true, action: 'ignored', reason: resolvedMessage.reason };
+  }
+
+  const message = resolvedMessage;
   const contextSettings = resolveConversationContext(message.remoteJid, config.policy);
   const conversationContext = getConversationContext(state, message.remoteJid, contextSettings);
   if (target && contextSettings.enabled) {
@@ -387,18 +562,12 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     {
       target: targetLabel,
       messageId: message.id,
-      action: decision.action,
-      reasons: decision.reasons,
-      profile: decision.profile,
-      responderModel: config.responder.model,
-      contextMessages: conversationContext.length
+      inputKind: message.inputKind,
+      contextMessages: conversationContext.length,
+      textChars: message.text.length
     },
-    'openclaw inbound policy decision'
+    'openclaw inbound message normalized'
   );
-
-  if (decision.action !== 'draft' && decision.action !== 'auto') {
-    return { ok: true, action: decision.action, reasons: decision.reasons };
-  }
 
   const reply = await generateDraftReply({
     remoteJid: message.remoteJid,
@@ -488,7 +657,9 @@ const server = http.createServer(async (request, response) => {
           twilioOnly,
           twilioWebhookPath,
           responderModel: config.responder.model,
-          responderBaseUrl: config.responder.baseUrl
+          responderBaseUrl: config.responder.baseUrl,
+          transcriberModel: config.transcriber.model,
+          transcriberConfigured: Boolean(config.transcriber.apiKey)
         });
       } catch (error) {
         sendJson(response, 200, {
