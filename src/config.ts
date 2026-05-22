@@ -20,6 +20,12 @@ const guidanceProfileSchema = z.object({
   language: z.string().default('pt-BR'),
   tone: z.string().default('natural, breve e direto'),
   identityPolicy: z.enum(['masked', 'open']).default('masked'),
+  typing: z
+    .object({
+      enabled: z.boolean().default(true),
+      intervalMs: z.number().int().min(1000).max(30000).default(7000)
+    })
+    .default({}),
   tools: z
     .object({
       webSearch: z.boolean().default(false),
@@ -86,6 +92,10 @@ const policySchema = z.object({
         label: 'Default',
         language: 'pt-BR',
         tone: 'natural, breve e direto',
+        typing: {
+          enabled: true,
+          intervalMs: 7000
+        },
         instructions: ['Responda como assistente pessoal, sem parecer atendimento comercial.'],
         boundaries: ['Nao assuma compromissos, pagamentos ou decisoes sensiveis sem revisao humana.'],
         maxResponseChars: 700

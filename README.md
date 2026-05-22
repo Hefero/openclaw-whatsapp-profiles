@@ -104,6 +104,8 @@ Configure profiles and targets in `config/bot-policy.local.json`. Start from `co
 
 The example policy opens inbound visibility with `allowContacts=["*"]` and `allowGroups=true`, but keeps `defaults.mode="observe"`. That means unknown chats are visible to the worker but do not generate replies unless you add a target or intentionally change the defaults.
 
+Profiles default to showing WhatsApp's native typing indicator while an automatic reply is being generated. Disable it per profile with `typing.enabled=false`, or tune the refresh interval with `typing.intervalMs`.
+
 Profiles can also opt into WhatsApp voice-note transcription with `voice.enabled=true`. Defaults keep voice disabled. Direct API mode can transcribe with the same provider credentials; local transcription uses `codex-proxy` plus a `whisper.cpp` server:
 
 ```text

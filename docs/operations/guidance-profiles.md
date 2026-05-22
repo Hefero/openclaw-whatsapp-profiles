@@ -113,6 +113,23 @@ Profiles can opt into responder tools:
 
 Profiles default to both tools disabled. If a profile asks for current information while `webSearch=false`, it should say it cannot verify from there instead of inventing a search result.
 
+## Typing Indicator
+
+Profiles show WhatsApp's native typing indicator by default while an automatic reply is being generated:
+
+```json
+{
+  "typing": {
+    "enabled": true,
+    "intervalMs": 7000
+  }
+}
+```
+
+The dispatch plugin asks the worker for a fast typing policy before the full responder call. It only starts the indicator when the message is eligible for auto-reply and delivery is not already blocked by policy. Draft/observe/blocked messages stay silent so chats do not see "typing" without receiving a reply.
+
+Set `typing.enabled=false` on sensitive or low-priority profiles. Keep `intervalMs` below WhatsApp's presence expiry window; `7000` is the recommended default.
+
 ## Voice Messages
 
 Voice handling is also profile-gated:

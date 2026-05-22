@@ -43,6 +43,15 @@ type InboundMessage = {
   media?: InboundMedia;
 };
 
+type TypingPolicyResult = {
+  ok: true;
+  action: 'ignored' | 'observe' | 'draft' | 'auto' | 'blocked';
+  enabled: boolean;
+  intervalMs: number;
+  profile?: string;
+  reasons?: string[];
+};
+
 type InboundSeed = {
   id: string;
   remoteJid: string;
@@ -260,6 +269,43 @@ function fallbackVoiceText(reason: string): string {
   ].join(' ');
 }
 
+function typingPolicyDisabled(
+  intervalMs: number,
+  action: TypingPolicyResult['action'],
+  reason: string,
+  profile?: string
+): TypingPolicyResult {
+  return {
+    ok: true,
+    action,
+    enabled: false,
+    intervalMs,
+    profile,
+    reasons: [reason]
+  };
+}
+
+function seedCanProduceReply(seed: InboundSeed, config: AppConfig): { ok: true } | { ok: false; reason: string } {
+  if (seed.transcript || seedHasText(seed)) {
+    return { ok: true };
+  }
+
+  if (!seed.media && !isMediaPlaceholder(seed.text)) {
+    return { ok: false, reason: 'empty message' };
+  }
+
+  if (!isAudioSeed(seed)) {
+    return { ok: false, reason: 'non-audio media message' };
+  }
+
+  const guidance = resolveGuidance(seed.remoteJid, config.policy);
+  if (!guidance.profile.voice.enabled || !guidance.profile.voice.transcribe) {
+    return { ok: false, reason: 'voice disabled for profile' };
+  }
+
+  return { ok: true };
+}
+
 async function resolveMessageFromSeed(
   seed: InboundSeed,
   config: AppConfig
@@ -473,6 +519,90 @@ function replyFromResult(result: unknown): string | undefined {
   return action === 'reply' && typeof reply === 'string' && reply.length > 0 ? reply : undefined;
 }
 
+function resolveTypingPolicyForInbound(payload: InboundPayload): TypingPolicyResult {
+  const config = loadConfig();
+
+  if (payload.context?.channelId !== 'whatsapp') {
+    return typingPolicyDisabled(7000, 'ignored', 'not whatsapp');
+  }
+
+  const target = findTarget(payload, config);
+  const remoteJid = resolveRemoteJid(payload, target);
+  if (!remoteJid) {
+    return typingPolicyDisabled(7000, 'ignored', 'sender not detected');
+  }
+
+  const guidance = resolveGuidance(remoteJid, config.policy);
+  const intervalMs = guidance.profile.typing.intervalMs;
+  const profile = guidance.profileName;
+  const seed = normalizeInboundSeed(payload, remoteJid);
+  if (!seed) {
+    return typingPolicyDisabled(intervalMs, 'ignored', 'empty message', profile);
+  }
+
+  if (seedHasText(seed) && isTwilioSandboxDefaultEcho(seed.text ?? '')) {
+    return typingPolicyDisabled(intervalMs, 'ignored', 'twilio sandbox default echo', profile);
+  }
+
+  const state = loadRuntimeState();
+  if (hasSeen(state, seed.remoteJid, seed.id)) {
+    return typingPolicyDisabled(intervalMs, 'ignored', 'duplicate message', profile);
+  }
+
+  if (seedHasText(seed) && isRecentOutbound(state, seed.remoteJid, seed.text ?? '')) {
+    return typingPolicyDisabled(intervalMs, 'ignored', 'recent outbound echo', profile);
+  }
+
+  const decision = decideMessageAction(seed.remoteJid, config.mode, config.policy);
+  if (decision.action !== 'auto') {
+    return {
+      ok: true,
+      action: decision.action === 'ignore' ? 'ignored' : decision.action,
+      enabled: false,
+      intervalMs,
+      profile: decision.profile ?? profile,
+      reasons: decision.reasons
+    };
+  }
+
+  const replyReadiness = seedCanProduceReply(seed, config);
+  if (!replyReadiness.ok) {
+    return typingPolicyDisabled(intervalMs, 'ignored', replyReadiness.reason, profile);
+  }
+
+  const delivery = decideDelivery(config.policy, target);
+  if (!delivery.allowed) {
+    return {
+      ok: true,
+      action: 'blocked',
+      enabled: false,
+      intervalMs,
+      profile: decision.profile ?? profile,
+      reasons: delivery.reasons
+    };
+  }
+
+  const hourlyLimit = target?.autoReply.maxRepliesPerHour ?? config.policy.maxAutoRepliesPerHour;
+  const recentAutoReplies = countRecentOutbound(state, seed.remoteJid, 60 * 60 * 1000);
+  if (recentAutoReplies >= hourlyLimit) {
+    return typingPolicyDisabled(
+      intervalMs,
+      'blocked',
+      `max auto replies per hour reached (${hourlyLimit})`,
+      decision.profile ?? profile
+    );
+  }
+
+  return {
+    ok: true,
+    action: 'auto',
+    enabled: guidance.profile.typing.enabled,
+    intervalMs,
+    profile: decision.profile ?? profile,
+    reasons: guidance.profile.typing.enabled ? ['typing indicator enabled'] : ['typing indicator disabled for profile']
+  };
+}
+
 async function handleInbound(payload: InboundPayload): Promise<unknown> {
   const config = loadConfig();
 
@@ -679,6 +809,17 @@ const server = http.createServer(async (request, response) => {
 
       const payload = (await readJson(request)) as InboundPayload;
       sendJson(response, 200, await handleInbound(payload));
+      return;
+    }
+
+    if (request.method === 'POST' && requestPath === '/openclaw/typing-policy') {
+      if (twilioOnly) {
+        sendJson(response, 404, { ok: false, error: 'not-found' });
+        return;
+      }
+
+      const payload = (await readJson(request)) as InboundPayload;
+      sendJson(response, 200, resolveTypingPolicyForInbound(payload));
       return;
     }
 

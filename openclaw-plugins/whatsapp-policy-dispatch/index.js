@@ -2,6 +2,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/core";
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:8790/openclaw/message";
 const FALLBACK_TIMEOUT_MS = 120000;
+const DEFAULT_TYPING_INTERVAL_MS = 7000;
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -23,26 +24,30 @@ function isObject(value) {
 
 function resolveConfig(api) {
   const pluginConfig = isObject(api.pluginConfig) ? api.pluginConfig : {};
+  const endpoint =
+    stringValue(pluginConfig.endpoint) ||
+    stringValue(process.env.WHATSAPP_ASSISTANT_HOOK_URL) ||
+    DEFAULT_ENDPOINT;
   return {
     enabled: pluginConfig.enabled !== false,
-    endpoint:
-      stringValue(pluginConfig.endpoint) ||
-      stringValue(process.env.WHATSAPP_ASSISTANT_HOOK_URL) ||
-      DEFAULT_ENDPOINT,
+    endpoint,
+    typingPolicyEndpoint:
+      stringValue(pluginConfig.typingPolicyEndpoint) ||
+      resolveSiblingEndpoint(endpoint, "/openclaw/typing-policy"),
     timeoutMs: numberValue(pluginConfig.timeoutMs, DEFAULT_TIMEOUT_MS)
   };
 }
 
-function resolveContent(event) {
-  return stringValue(event?.content) || stringValue(event?.body);
-}
-
-function isMediaPlaceholder(value) {
-  return /^<media:[a-z0-9_-]+>$/i.test(stringValue(value));
-}
-
-function shouldDeferToReplyDispatch(event) {
-  return isMediaPlaceholder(event?.content) || isMediaPlaceholder(event?.body);
+function resolveSiblingEndpoint(endpoint, pathname) {
+  try {
+    const url = new URL(endpoint);
+    url.pathname = pathname;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return endpoint.replace(/\/openclaw\/message(?:\?.*)?$/u, pathname);
+  }
 }
 
 function resolveFirstId(...values) {
@@ -92,48 +97,6 @@ function resolveGroupId(...values) {
   return "";
 }
 
-function buildWorkerPayload(event, ctx, content) {
-  const senderId = resolveFirstId(ctx?.senderId, event?.senderId);
-  const openclawConversationId = resolveFirstId(ctx?.conversationId, event?.conversationId);
-  const sessionKey = resolveFirstId(ctx?.sessionKey, event?.sessionKey);
-  const sessionGroupId = resolveGroupIdFromSessionKey(sessionKey);
-  const groupId = resolveGroupId(
-    ctx?.conversationId,
-    event?.conversationId,
-    ctx?.chatId,
-    event?.chatId,
-    ctx?.remoteJid,
-    event?.remoteJid,
-    sessionGroupId
-  );
-  const isGroup = event?.isGroup === true || Boolean(groupId);
-  const conversationId = isGroup ? groupId || openclawConversationId : resolveFirstId(senderId, openclawConversationId);
-  const from = resolveFirstId(conversationId, senderId, sessionKey);
-  const timestamp = typeof event?.timestamp === "number" ? event.timestamp : Date.now();
-
-  return {
-    type: "message",
-    action: "received",
-    sessionKey,
-    timestamp,
-    context: {
-      from,
-      content,
-      channelId: "whatsapp",
-      metadata: {
-        senderId,
-        conversationId,
-        chatId: conversationId,
-        remoteJid: conversationId,
-        from,
-        openclawConversationId,
-        accountId: resolveFirstId(ctx?.accountId),
-        isGroup
-      }
-    }
-  };
-}
-
 function resolveReplyDispatchChannel(ctx) {
   return resolveFirstId(ctx?.OriginatingChannel, ctx?.Provider, ctx?.Surface);
 }
@@ -170,10 +133,10 @@ function buildWorkerPayloadFromReplyDispatch(event) {
   );
   const conversationId = isGroup ? groupId || openclawConversationId : resolveFirstId(senderId, openclawConversationId);
   const content =
-    resolveCtxString(msgCtx, "BodyForAgent") ||
     resolveCtxString(msgCtx, "RawBody") ||
     resolveCtxString(msgCtx, "Body") ||
     transcript ||
+    resolveCtxString(msgCtx, "BodyForAgent") ||
     (mediaType.startsWith("audio/") ? "<media:audio>" : "");
   const timestamp = typeof msgCtx.Timestamp === "number" ? msgCtx.Timestamp : Date.now();
 
@@ -230,21 +193,76 @@ async function postToWorker(endpoint, timeoutMs, payload) {
   }
 }
 
-function resultToDispatch(result) {
-  if (result?.action === "reply" && typeof result.reply === "string" && result.reply.trim()) {
-    return { handled: true, text: result.reply.trim() };
+function normalizeTypingPolicy(body) {
+  const raw = isObject(body?.typing) ? body.typing : body;
+  if (!isObject(raw)) {
+    return { enabled: false, intervalMs: DEFAULT_TYPING_INTERVAL_MS };
   }
 
-  if (
-    result?.action === "draft" ||
-    result?.action === "manual" ||
-    result?.action === "ignored" ||
-    result?.action === "blocked"
-  ) {
-    return { handled: true };
+  return {
+    enabled: raw.enabled === true,
+    intervalMs: numberValue(raw.intervalMs, DEFAULT_TYPING_INTERVAL_MS)
+  };
+}
+
+async function resolveTypingPolicy(config, payload, api) {
+  try {
+    const { response, body } = await postToWorker(config.typingPolicyEndpoint, config.timeoutMs, payload);
+    if (!response.ok) {
+      api.logger.warn?.(
+        `whatsapp-policy-dispatch: typing policy returned HTTP ${response.status}, skipping typing indicator`
+      );
+      return { enabled: false, intervalMs: DEFAULT_TYPING_INTERVAL_MS };
+    }
+
+    return normalizeTypingPolicy(body);
+  } catch (error) {
+    api.logger.debug?.(
+      `whatsapp-policy-dispatch: typing policy unavailable, skipping typing indicator: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return { enabled: false, intervalMs: DEFAULT_TYPING_INTERVAL_MS };
+  }
+}
+
+function startTypingIndicator(ctx, typing, api) {
+  if (!typing.enabled || typeof ctx?.onReplyStart !== "function") {
+    return () => {};
   }
 
-  return { handled: true };
+  let stopped = false;
+  let inFlight = false;
+  const intervalMs = numberValue(typing.intervalMs, DEFAULT_TYPING_INTERVAL_MS);
+  const tick = async () => {
+    if (stopped || inFlight) {
+      return;
+    }
+
+    inFlight = true;
+    try {
+      await ctx.onReplyStart();
+    } catch (error) {
+      api.logger.debug?.(
+        `whatsapp-policy-dispatch: typing indicator failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  void tick();
+  const timer = setInterval(() => {
+    void tick();
+  }, intervalMs);
+  timer.unref?.();
+
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 
 export default definePluginEntry({
@@ -259,6 +277,7 @@ export default definePluginEntry({
       properties: {
         enabled: { type: "boolean" },
         endpoint: { type: "string" },
+        typingPolicyEndpoint: { type: "string" },
         timeoutMs: { type: "number" }
       }
     }
@@ -275,38 +294,7 @@ export default definePluginEntry({
         return { handled: true };
       }
 
-      if (shouldDeferToReplyDispatch(event)) {
-        return;
-      }
-
-      const content = resolveContent(event);
-      if (!content) {
-        return { handled: true };
-      }
-
-      const payload = buildWorkerPayload(event, ctx, content);
-
-      try {
-        const { response, body } = await postToWorker(config.endpoint, config.timeoutMs, payload);
-        if (!response.ok) {
-          api.logger.warn?.(
-            `whatsapp-policy-dispatch: worker returned HTTP ${response.status}, suppressing native reply`
-          );
-          return { handled: true };
-        }
-
-        api.logger.info?.(
-          `whatsapp-policy-dispatch: worker action=${stringValue(body?.action) || "unknown"} target=${stringValue(payload.context?.from) || "unknown"}`
-        );
-        return resultToDispatch(body);
-      } catch (error) {
-        api.logger.error?.(
-          `whatsapp-policy-dispatch: worker call failed, suppressing native reply: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-        return { handled: true };
-      }
+      return;
     }, { timeoutMs: DEFAULT_TIMEOUT_MS });
 
     api.on("reply_dispatch", async (event, ctx) => {
@@ -326,9 +314,15 @@ export default definePluginEntry({
         stringValue(payload.context?.metadata?.mediaPath) ||
         stringValue(payload.context?.metadata?.mediaUrl) ||
         stringValue(payload.context?.metadata?.mediaType);
-      if (!hasMedia) {
-        return;
+      const hasContent = stringValue(payload.context?.content);
+      if (!hasMedia && !hasContent) {
+        ctx.recordProcessed?.("completed", { reason: "whatsapp-policy-dispatch-empty-message" });
+        ctx.markIdle?.("message_completed");
+        return { handled: true, queuedFinal: false, counts: ctx.dispatcher.getQueuedCounts() };
       }
+
+      const typing = await resolveTypingPolicy(config, payload, api);
+      const stopTypingIndicator = startTypingIndicator(ctx, typing, api);
 
       try {
         const { response, body } = await postToWorker(config.endpoint, config.timeoutMs, payload);
@@ -361,6 +355,8 @@ export default definePluginEntry({
         ctx.recordProcessed?.("completed", { reason: "whatsapp-policy-dispatch-worker-error" });
         ctx.markIdle?.("message_completed");
         return { handled: true, queuedFinal: false, counts: ctx.dispatcher.getQueuedCounts() };
+      } finally {
+        stopTypingIndicator();
       }
     }, { timeoutMs: DEFAULT_TIMEOUT_MS });
   }

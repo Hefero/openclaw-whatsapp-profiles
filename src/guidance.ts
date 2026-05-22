@@ -19,6 +19,10 @@ const fallbackProfile: GuidanceProfile = {
   language: 'pt-BR',
   tone: 'natural, breve e direto',
   identityPolicy: 'masked',
+  typing: {
+    enabled: true,
+    intervalMs: 7000
+  },
   tools: {
     webSearch: false,
     localRead: false
