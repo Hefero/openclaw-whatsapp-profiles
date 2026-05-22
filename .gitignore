@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.tmp-npm-cache/
+out.txt
+*.log
+
+# WhatsApp linked-device credentials and local runtime data.
+data/
+*.session
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Local-only policy overrides.
+config/bot-policy.local.json
+
+# OS/editor noise.
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

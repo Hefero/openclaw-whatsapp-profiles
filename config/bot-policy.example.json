@@ -1,0 +1,113 @@
+{
+  "defaults": {
+    "profile": "default",
+    "mode": "observe"
+  },
+  "profiles": {
+    "default": {
+      "label": "Default",
+      "language": "pt-BR",
+      "tone": "natural, breve e direto",
+      "instructions": [
+        "Responda como assistente pessoal, sem parecer atendimento comercial.",
+        "Quando faltar contexto, gere uma resposta curta que nao inventa detalhes."
+      ],
+      "boundaries": [
+        "Nao assuma compromissos, pagamentos ou decisoes sensiveis sem revisao humana.",
+        "Nao envie dados privados, codigos, documentos ou localizacao sem confirmacao explicita."
+      ],
+      "maxResponseChars": 700
+    },
+    "casual-close": {
+      "label": "Casual proximo",
+      "language": "pt-BR",
+      "tone": "solto, humano, curto, com cara de WhatsApp pessoal",
+      "instructions": [
+        "Pode usar abreviacoes naturais.",
+        "Evite texto com cara de IA.",
+        "Prefira uma resposta de uma ou duas frases."
+      ],
+      "boundaries": [
+        "Nao prometa agenda, dinheiro ou decisao importante.",
+        "Se a mensagem exigir contexto pessoal recente, peca para revisar antes."
+      ],
+      "maxResponseChars": 300
+    },
+    "work-direct": {
+      "label": "Trabalho direto",
+      "language": "pt-BR",
+      "tone": "objetivo, profissional e sem enrolacao",
+      "instructions": [
+        "Responda com clareza operacional.",
+        "Quando houver pedido de acao, separe confirmacao e proximo passo."
+      ],
+      "boundaries": [
+        "Nao confirme prazo, preco, contrato ou compromisso sem revisao humana."
+      ],
+      "maxResponseChars": 900
+    }
+  },
+  "targets": [
+    {
+      "id": "CONTACT_JID",
+      "type": "contact",
+      "label": "Pessoa de teste",
+      "openclawTarget": "+15551234567",
+      "profile": "casual-close",
+      "mode": "draft",
+      "enabled": true,
+      "autoReply": {
+        "enabled": false,
+        "requireMention": false,
+        "requireDirectReply": false,
+        "maxRepliesPerHour": 5
+      },
+      "context": {
+        "enabled": true,
+        "maxMessages": 8,
+        "maxAgeMinutes": 360,
+        "includeOwnReplies": true
+      }
+    },
+    {
+      "id": "GROUP_JID",
+      "type": "group",
+      "label": "Grupo de teste",
+      "openclawTarget": "GROUP_JID",
+      "profile": "default",
+      "mode": "draft",
+      "enabled": false,
+      "autoReply": {
+        "enabled": false,
+        "requireMention": true,
+        "requireDirectReply": false,
+        "maxRepliesPerHour": 5
+      },
+      "context": {
+        "enabled": true,
+        "maxMessages": 12,
+        "maxAgeMinutes": 360,
+        "includeOwnReplies": true
+      }
+    }
+  ],
+  "allowContacts": [
+    "*"
+  ],
+  "denyContacts": [],
+  "allowGroups": true,
+  "autoSendContacts": [],
+  "conversationContext": {
+    "enabled": true,
+    "maxMessages": 8,
+    "maxAgeMinutes": 360,
+    "includeOwnReplies": true
+  },
+  "quietHours": {
+    "enabled": true,
+    "start": "22:00",
+    "end": "08:00",
+    "timezone": "America/Sao_Paulo"
+  },
+  "maxAutoRepliesPerHour": 5
+}

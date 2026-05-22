@@ -1,0 +1,40 @@
+{
+  "name": "whatsapp-personal-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first WhatsApp personal assistant powered by OpenClaw and policy profiles.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "codex-proxy": "tsx src/codex-proxy/server.ts",
+    "codex-proxy:dev": "tsx watch src/codex-proxy/server.ts",
+    "codex-proxy:test": "tsx src/codex-proxy/smoke-test.ts",
+    "warmup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/warmup.ps1",
+    "warmup:linux": "tsx scripts/warmup-linux.ts",
+    "warmup:status": "tsx scripts/warmup-status.ts",
+    "warmup:stop": "tsx scripts/warmup-stop.ts",
+    "warmup:reset": "tsx scripts/warmup-reset.ts",
+    "openclaw:install-whatsapp": "openclaw plugins install clawhub:@openclaw/whatsapp --pin --force",
+    "openclaw:install-dispatch-plugin": "openclaw plugins install ./openclaw-plugins/whatsapp-policy-dispatch --force",
+    "openclaw:repair-config": "tsx scripts/repair-openclaw-config.ts",
+    "openclaw:schema-check": "tsx scripts/openclaw-schema-check.ts",
+    "openclaw:worker": "tsx src/index.ts",
+    "openclaw:send": "tsx scripts/openclaw-send.ts",
+    "openclaw:control": "tsx scripts/openclaw-control.ts",
+    "twilio:send": "tsx scripts/twilio-send.ts",
+    "twilio:worker": "tsx scripts/twilio-worker.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "16.4.7",
+    "pino": "9.6.0",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.7",
+    "openclaw": "2026.5.20",
+    "tsx": "^4.22.3",
+    "typescript": "5.7.3"
+  }
+}
