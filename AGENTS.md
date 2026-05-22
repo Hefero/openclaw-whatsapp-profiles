@@ -18,6 +18,7 @@ npm run warmup:status
 
 Managed processes:
 
+- optional `whisper-local` on `127.0.0.1:2022` when `WHISPER_LOCAL_ENABLED=true`
 - `codex-proxy` on `127.0.0.1:8787`
 - OpenClaw gateway on `127.0.0.1:18789`
 - `openclaw-control` on `127.0.0.1:8788`
@@ -28,6 +29,13 @@ The warmup command installs or refreshes the local OpenClaw dispatch plugin.
 project ports are owned by unknown processes.
 
 Logs and pid files are under `data/runtime/`.
+
+For local voice transcription:
+
+```bash
+cmd /c npm run warmup:whisper
+cmd /c npm run whisper:status
+```
 
 To stop only processes started by the warmup manager:
 

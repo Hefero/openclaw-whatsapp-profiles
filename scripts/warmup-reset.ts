@@ -9,6 +9,7 @@ import {
 } from './warmup-utils.js';
 
 const names: ManagedName[] = [
+  'whisper-local',
   'openclaw-worker',
   'openclaw-control',
   'openclaw-gateway',
@@ -19,6 +20,9 @@ const ports = [
   ...(process.env.CODEX_PROXY_ENABLED === 'false'
     ? []
     : [Number(process.env.CODEX_PROXY_PORT ?? '8787')]),
+  ...(process.env.WHISPER_LOCAL_ENABLED === 'true'
+    ? [Number(process.env.WHISPER_LOCAL_PORT ?? '2022')]
+    : []),
   Number(process.env.OPENCLAW_CONTROL_PORT ?? '8788'),
   Number(process.env.WHATSAPP_ASSISTANT_HOOK_PORT ?? '8790'),
   Number(process.env.OPENCLAW_GATEWAY_PORT ?? '18789')

@@ -6,6 +6,7 @@ import process from 'node:process';
 import { spawn } from 'node:child_process';
 
 export type ManagedName =
+  | 'whisper-local'
   | 'codex-proxy'
   | 'openclaw-gateway'
   | 'openclaw-control'
@@ -102,6 +103,37 @@ export function spawnManaged(
           env,
           stdio: ['ignore', output, output]
         });
+
+  child.unref();
+
+  const info = {
+    name,
+    pid: child.pid ?? 0,
+    command,
+    args,
+    startedAt,
+    logPath: logPath(name)
+  };
+  writePidInfo(info);
+  return info;
+}
+
+export function spawnManagedDirect(
+  name: ManagedName,
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv
+): PidInfo {
+  ensureRuntimeDir();
+  const output = fs.openSync(logPath(name), 'a');
+  const startedAt = new Date().toISOString();
+  const child = spawn(command, args, {
+    cwd: process.cwd(),
+    detached: true,
+    env,
+    stdio: ['ignore', output, output],
+    windowsHide: true
+  });
 
   child.unref();
 

@@ -24,7 +24,11 @@ const configSchema = z.object({
   sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).default('read-only'),
   allowWebSearch: z.coerce.boolean().default(true),
   workdir: z.string().default('.'),
-  bin: z.string().default(process.platform === 'win32' ? 'codex.cmd' : 'codex')
+  bin: z.string().default(process.platform === 'win32' ? 'codex.cmd' : 'codex'),
+  transcriberProvider: z.enum(['off', 'openai', 'local-whisper', 'custom']).default('off'),
+  transcriberBaseUrl: z.string().optional(),
+  transcriberApiKey: z.string().optional(),
+  transcriberTimeoutMs: z.coerce.number().int().min(1000).default(60000)
 });
 
 const serverConfig = configSchema.parse({
@@ -37,7 +41,11 @@ const serverConfig = configSchema.parse({
   sandbox: process.env.CODEX_PROXY_SANDBOX,
   allowWebSearch: process.env.CODEX_PROXY_ALLOW_WEB_SEARCH,
   workdir: process.env.CODEX_PROXY_WORKDIR,
-  bin: process.env.CODEX_PROXY_CODEX_BIN
+  bin: process.env.CODEX_PROXY_CODEX_BIN,
+  transcriberProvider: process.env.CODEX_PROXY_TRANSCRIBER_PROVIDER,
+  transcriberBaseUrl: process.env.CODEX_PROXY_TRANSCRIBER_BASE_URL,
+  transcriberApiKey: process.env.CODEX_PROXY_TRANSCRIBER_API_KEY ?? process.env.OPENAI_API_KEY,
+  transcriberTimeoutMs: process.env.CODEX_PROXY_TRANSCRIBER_TIMEOUT_MS
 });
 
 const runnerConfig: CodexRunnerConfig = {
@@ -80,6 +88,15 @@ async function readJson(request: http.IncomingMessage): Promise<unknown> {
   return body ? JSON.parse(body) : {};
 }
 
+async function readRaw(request: http.IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks);
+}
+
 function isAuthorized(request: http.IncomingMessage): boolean {
   if (!serverConfig.apiKey) {
     return true;
@@ -92,6 +109,83 @@ function headerEnabled(request: http.IncomingMessage, name: string): boolean {
   return request.headers[name.toLowerCase()]?.toString().toLowerCase() === 'true';
 }
 
+function transcriberBaseUrl(): string {
+  if (serverConfig.transcriberBaseUrl) {
+    return serverConfig.transcriberBaseUrl;
+  }
+
+  return serverConfig.transcriberProvider === 'local-whisper'
+    ? 'http://127.0.0.1:2022/v1'
+    : 'https://api.openai.com/v1';
+}
+
+function transcriberAuthHeader(): string | undefined {
+  if (serverConfig.transcriberProvider === 'local-whisper') {
+    return serverConfig.transcriberApiKey ? `Bearer ${serverConfig.transcriberApiKey}` : undefined;
+  }
+
+  return serverConfig.transcriberApiKey ? `Bearer ${serverConfig.transcriberApiKey}` : undefined;
+}
+
+async function forwardAudioTranscription(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  if (serverConfig.transcriberProvider === 'off') {
+    sendJson(response, 501, {
+      error: {
+        message: 'Audio transcription is disabled in codex-proxy',
+        type: 'not_implemented'
+      }
+    });
+    return;
+  }
+
+  if (serverConfig.transcriberProvider === 'openai' && !serverConfig.transcriberApiKey) {
+    sendJson(response, 500, {
+      error: {
+        message: 'CODEX_PROXY_TRANSCRIBER_API_KEY or OPENAI_API_KEY is required for openai transcription',
+        type: 'server_error'
+      }
+    });
+    return;
+  }
+
+  const contentType = request.headers['content-type'];
+  if (!contentType?.includes('multipart/form-data')) {
+    sendJson(response, 400, {
+      error: {
+        message: 'Expected multipart/form-data',
+        type: 'invalid_request_error'
+      }
+    });
+    return;
+  }
+
+  const body = await readRaw(request);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), serverConfig.transcriberTimeoutMs);
+
+  try {
+    const upstreamUrl = `${transcriberBaseUrl().replace(/\/$/, '')}/audio/transcriptions`;
+    const authHeader = transcriberAuthHeader();
+    const upstream = await fetch(upstreamUrl, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': contentType,
+        ...(authHeader ? { authorization: authHeader } : {})
+      },
+      body
+    });
+    const upstreamBody = Buffer.from(await upstream.arrayBuffer());
+    response.writeHead(upstream.status, {
+      'content-type': upstream.headers.get('content-type') ?? 'application/json',
+      'content-length': upstreamBody.byteLength
+    });
+    response.end(upstreamBody);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? '127.0.0.1'}`);
@@ -101,7 +195,12 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         model: serverConfig.model,
         sandbox: serverConfig.sandbox,
-        allowWebSearch: serverConfig.allowWebSearch
+        allowWebSearch: serverConfig.allowWebSearch,
+        transcriberProvider: serverConfig.transcriberProvider,
+        transcriberBaseUrl: transcriberBaseUrl(),
+        transcriberConfigured:
+          serverConfig.transcriberProvider === 'local-whisper' ||
+          Boolean(serverConfig.transcriberApiKey)
       });
       return;
     }
@@ -127,6 +226,11 @@ const server = http.createServer(async (request, response) => {
           }
         ]
       });
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/audio/transcriptions') {
+      await forwardAudioTranscription(request, response);
       return;
     }
 
@@ -190,6 +294,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
       model: serverConfig.model,
       sandbox: serverConfig.sandbox,
       allowWebSearch: serverConfig.allowWebSearch,
+      transcriberProvider: serverConfig.transcriberProvider,
+      transcriberBaseUrl: transcriberBaseUrl(),
       workdir: runnerConfig.workdir,
       bin: serverConfig.bin,
       authEnabled: Boolean(serverConfig.apiKey)

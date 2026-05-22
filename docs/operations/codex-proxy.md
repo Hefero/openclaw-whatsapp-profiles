@@ -9,6 +9,7 @@ The worker does not require the local proxy specifically. It calls an OpenAI-com
 - `GET /healthz`
 - `GET /v1/models`
 - `POST /v1/chat/completions`
+- `POST /v1/audio/transcriptions`
 
 Streaming is not implemented.
 
@@ -41,6 +42,7 @@ CODEX_PROXY_SANDBOX=read-only
 CODEX_PROXY_ALLOW_WEB_SEARCH=true
 CODEX_PROXY_WORKDIR=.
 CODEX_PROXY_CODEX_BIN=codex.cmd
+CODEX_PROXY_TRANSCRIBER_PROVIDER=off
 ```
 
 Worker responder defaults to the local proxy when `RESPONDER_*` is omitted:
@@ -61,7 +63,7 @@ To bypass `codex-proxy` and use a paid OpenAI-compatible API directly, set:
 ```text
 CODEX_PROXY_ENABLED=false
 RESPONDER_BASE_URL=https://api.openai.com/v1
-RESPONDER_API_KEY=sk-your-api-key
+RESPONDER_API_KEY=your-api-key
 RESPONDER_MODEL=your-chat-completions-model
 RESPONDER_TIMEOUT_MS=60000
 ```
@@ -72,16 +74,43 @@ The direct API path is faster and more production-like, but it consumes API cred
 
 ## Voice Transcription
 
-`codex-proxy` only handles chat completions. It does not transcribe WhatsApp audio. Profile-enabled voice notes use the separate `TRANSCRIBER_*` settings:
+`codex-proxy` can also expose an OpenAI-compatible `/v1/audio/transcriptions` endpoint. It does not use `codex exec` for audio; it forwards the multipart transcription request to a configured transcription backend.
+
+Local Whisper path:
 
 ```text
-TRANSCRIBER_BASE_URL=https://api.openai.com/v1
-TRANSCRIBER_API_KEY=your-transcriber-api-key
-TRANSCRIBER_MODEL=whisper-1
+CODEX_PROXY_TRANSCRIBER_PROVIDER=local-whisper
+CODEX_PROXY_TRANSCRIBER_BASE_URL=http://127.0.0.1:2022/v1
+CODEX_PROXY_TRANSCRIBER_MODEL=base
+WHISPER_LOCAL_ENABLED=true
+WHISPER_LOCAL_MODEL=base
+TRANSCRIBER_BASE_URL=http://127.0.0.1:8787/v1
+TRANSCRIBER_API_KEY=dev-local-change-me
+TRANSCRIBER_MODEL=base
 TRANSCRIBER_TIMEOUT_MS=60000
 ```
 
-When `CODEX_PROXY_ENABLED=false`, the worker reuses `RESPONDER_API_KEY` for transcription unless `TRANSCRIBER_API_KEY` is set. With the default local proxy path, set `TRANSCRIBER_API_KEY` explicitly before enabling voice profiles in production.
+Run:
+
+```bash
+npm run warmup:whisper
+npm run warmup
+```
+
+On Windows, `warmup:whisper` downloads a portable `whisper.cpp` release, the `base` model, and a portable FFmpeg build under `data/whisper/`. Nothing from that directory should be committed.
+
+OpenAI transcription path:
+
+```text
+CODEX_PROXY_TRANSCRIBER_PROVIDER=openai
+CODEX_PROXY_TRANSCRIBER_API_KEY=your-transcriber-api-key
+CODEX_PROXY_TRANSCRIBER_MODEL=gpt-4o-mini-transcribe
+TRANSCRIBER_BASE_URL=http://127.0.0.1:8787/v1
+TRANSCRIBER_API_KEY=dev-local-change-me
+TRANSCRIBER_MODEL=gpt-4o-mini-transcribe
+```
+
+When `CODEX_PROXY_ENABLED=false`, the worker can bypass `codex-proxy` and call the configured `TRANSCRIBER_BASE_URL` directly. In that mode it reuses `RESPONDER_API_KEY` for transcription unless `TRANSCRIBER_API_KEY` is set.
 
 ## Guardrails
 

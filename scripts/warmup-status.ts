@@ -16,10 +16,13 @@ const proxyPort = process.env.CODEX_PROXY_PORT ?? '8787';
 const controlPort = process.env.OPENCLAW_CONTROL_PORT ?? '8788';
 const hookPort = process.env.WHATSAPP_ASSISTANT_HOOK_PORT ?? '8790';
 const gatewayPort = Number(process.env.OPENCLAW_GATEWAY_PORT ?? '18789');
+const whisperHost = process.env.WHISPER_LOCAL_HOST ?? '127.0.0.1';
+const whisperPort = Number(process.env.WHISPER_LOCAL_PORT ?? '2022');
 const proxyHealthUrl = `http://${host}:${proxyPort}/healthz`;
 const controlHealthUrl = `http://127.0.0.1:${controlPort}/healthz`;
 const hookHealthUrl = `http://127.0.0.1:${hookPort}/healthz`;
 const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED !== 'false';
+const whisperEnabled = process.env.WHISPER_LOCAL_ENABLED === 'true' || Boolean(readPidInfo('whisper-local'));
 
 async function statusFor(name: ManagedName): Promise<ManagedStatus> {
   if (name === 'codex-proxy' && !codexProxyEnabled) {
@@ -32,12 +35,24 @@ async function statusFor(name: ManagedName): Promise<ManagedStatus> {
     };
   }
 
+  if (name === 'whisper-local' && !whisperEnabled) {
+    return {
+      name,
+      running: false,
+      healthy: undefined,
+      detail: 'disabled WHISPER_LOCAL_ENABLED=false',
+      logPath: logPath(name)
+    };
+  }
+
   const info = readPidInfo(name);
   const running = isPidRunning(info?.pid);
   let healthy: boolean | undefined;
 
   if (name === 'codex-proxy') {
     healthy = await httpOk(proxyHealthUrl);
+  } else if (name === 'whisper-local') {
+    healthy = await tcpOpen(whisperHost, whisperPort);
   } else if (name === 'openclaw-control') {
     healthy = await httpOk(controlHealthUrl);
   } else if (name === 'openclaw-gateway') {
@@ -58,6 +73,7 @@ async function statusFor(name: ManagedName): Promise<ManagedStatus> {
 
 async function main(): Promise<void> {
   const names: ManagedName[] = [
+    ...(whisperEnabled ? (['whisper-local'] as ManagedName[]) : []),
     'codex-proxy',
     'openclaw-gateway',
     'openclaw-control',

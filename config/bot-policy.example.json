@@ -15,6 +15,7 @@
       "voice": {
         "enabled": false,
         "transcribe": true,
+        "language": "pt",
         "maxAudioBytes": 26214400
       },
       "instructions": [
@@ -38,6 +39,7 @@
       "voice": {
         "enabled": false,
         "transcribe": true,
+        "language": "pt",
         "maxAudioBytes": 26214400
       },
       "instructions": [
@@ -62,6 +64,7 @@
       "voice": {
         "enabled": false,
         "transcribe": true,
+        "language": "pt",
         "maxAudioBytes": 26214400
       },
       "instructions": [

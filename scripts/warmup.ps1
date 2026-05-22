@@ -48,6 +48,7 @@ Import-DotEnv
 $openclawCommand = Get-DotEnvValue "OPENCLAW_COMMAND" "openclaw"
 $openclawCommandForCmd = if ($openclawCommand -match '\s') { "`"$openclawCommand`"" } else { $openclawCommand }
 $codexProxyEnabled = (Get-DotEnvValue "CODEX_PROXY_ENABLED" "true") -ne "false"
+$whisperLocalEnabled = (Get-DotEnvValue "WHISPER_LOCAL_ENABLED" "false") -eq "true"
 
 function Test-Port($port) {
   $client = New-Object System.Net.Sockets.TcpClient
@@ -83,6 +84,9 @@ function Wait-Port($port, $timeoutSeconds) {
 $ports = @()
 if ($codexProxyEnabled) {
   $ports += [int](Get-DotEnvValue "CODEX_PROXY_PORT" "8787")
+}
+if ($whisperLocalEnabled) {
+  $ports += [int](Get-DotEnvValue "WHISPER_LOCAL_PORT" "2022")
 }
 $ports += [int](Get-DotEnvValue "OPENCLAW_CONTROL_PORT" "8788")
 $ports += [int](Get-DotEnvValue "WHATSAPP_ASSISTANT_HOOK_PORT" "8790")
@@ -147,6 +151,14 @@ if ($codexProxyEnabled) {
   Start-Managed "codex-proxy" "npm run codex-proxy"
 } else {
   Write-Host "codex-proxy skipped CODEX_PROXY_ENABLED=false"
+}
+if ($whisperLocalEnabled) {
+  cmd /d /c npm run warmup:whisper
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "whisper-local failed to start; voice transcription may fail"
+  }
+} else {
+  Write-Host "whisper-local skipped WHISPER_LOCAL_ENABLED=false"
 }
 Start-Managed "openclaw-gateway" "$openclawCommandForCmd gateway run --force --allow-unconfigured"
 Start-Managed "openclaw-control" "npm run openclaw:control"

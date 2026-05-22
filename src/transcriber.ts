@@ -107,8 +107,9 @@ export async function transcribeVoiceMessage(
       fileNameFor(media)
     );
 
-    if (transcriber.language) {
-      form.append('language', transcriber.language);
+    const language = profile.voice.language ?? transcriber.language;
+    if (language) {
+      form.append('language', language);
     }
 
     if (transcriber.prompt) {

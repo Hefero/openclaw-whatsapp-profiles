@@ -5,6 +5,7 @@ import {
 } from './warmup-utils.js';
 
 const names: ManagedName[] = [
+  'whisper-local',
   'openclaw-worker',
   'openclaw-control',
   'openclaw-gateway',

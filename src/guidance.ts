@@ -26,6 +26,7 @@ const fallbackProfile: GuidanceProfile = {
   voice: {
     enabled: false,
     transcribe: true,
+    language: undefined,
     maxAudioBytes: 25 * 1024 * 1024
   },
   instructions: ['Responda como assistente pessoal, sem parecer atendimento comercial.'],
@@ -89,7 +90,7 @@ export function buildGuidancePrompt(
     `Tom: ${profile.tone}`,
     `Politica de identidade: ${profile.identityPolicy}`,
     `Ferramentas permitidas: webSearch=${profile.tools.webSearch}, localRead=${profile.tools.localRead}`,
-    `Audio permitido: voice=${profile.voice.enabled}, transcribe=${profile.voice.transcribe}`,
+    `Audio permitido: voice=${profile.voice.enabled}, transcribe=${profile.voice.transcribe}, language=${profile.voice.language ?? 'auto'}`,
     history,
     `Mensagem: ${text || '[sem texto extraivel]'}`,
     `Instrucoes: ${instructions.join(' ')}`,

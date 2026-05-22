@@ -18,7 +18,9 @@ const root = process.cwd();
 const env = { ...process.env };
 const openclawCommand = process.env.OPENCLAW_COMMAND?.trim() || 'openclaw';
 const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED !== 'false';
+const whisperLocalEnabled = process.env.WHISPER_LOCAL_ENABLED === 'true';
 const names: ManagedName[] = [
+  ...(whisperLocalEnabled ? (['whisper-local'] as ManagedName[]) : []),
   'openclaw-worker',
   'openclaw-control',
   'openclaw-gateway',
@@ -59,6 +61,7 @@ function inspectWhatsAppPlugin(): boolean {
 async function assertPortsClear(): Promise<void> {
   const ports = [
     ...(codexProxyEnabled ? [Number(process.env.CODEX_PROXY_PORT ?? '8787')] : []),
+    ...(whisperLocalEnabled ? [Number(process.env.WHISPER_LOCAL_PORT ?? '2022')] : []),
     Number(process.env.OPENCLAW_CONTROL_PORT ?? '8788'),
     Number(process.env.WHATSAPP_ASSISTANT_HOOK_PORT ?? '8790'),
     Number(process.env.OPENCLAW_GATEWAY_PORT ?? '18789')
@@ -141,12 +144,24 @@ async function main(): Promise<void> {
     console.log('codex-proxy skipped CODEX_PROXY_ENABLED=false');
   }
 
+  if (whisperLocalEnabled) {
+    run('npm', ['run', 'warmup:whisper'], 'start local Whisper');
+  } else {
+    console.log('whisper-local skipped WHISPER_LOCAL_ENABLED=false');
+  }
+
   const gatewayPort = Number(process.env.OPENCLAW_GATEWAY_PORT ?? '18789');
   await waitFor(() => tcpOpen('127.0.0.1', gatewayPort), 45_000);
   if (codexProxyEnabled) {
     await waitFor(
       () => httpOk(`http://127.0.0.1:${process.env.CODEX_PROXY_PORT ?? '8787'}/healthz`),
       30_000
+    );
+  }
+  if (whisperLocalEnabled) {
+    await waitFor(
+      () => tcpOpen(process.env.WHISPER_LOCAL_HOST ?? '127.0.0.1', Number(process.env.WHISPER_LOCAL_PORT ?? '2022')),
+      45_000
     );
   }
   await waitFor(

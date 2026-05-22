@@ -122,14 +122,15 @@ Voice handling is also profile-gated:
   "voice": {
     "enabled": true,
     "transcribe": true,
+    "language": "pt",
     "maxAudioBytes": 26214400
   }
 }
 ```
 
-Defaults keep `voice.enabled=false`, so wildcard contacts and groups do not get audio transcribed unless their selected profile opts in. When enabled, the OpenClaw dispatch plugin forwards audio metadata to the worker, the worker transcribes the voice note, then the normal guidance/profile flow answers the transcript.
+Defaults keep `voice.enabled=false`, so wildcard contacts and groups do not get audio transcribed unless their selected profile opts in. `voice.language` is optional, but setting it per profile avoids language auto-detection mistakes. Use ISO-639-1 values such as `pt`, `en`, or `es`.
 
-Real transcription requires `TRANSCRIBER_API_KEY` when using the default local `codex-proxy` responder path. In direct API mode (`CODEX_PROXY_ENABLED=false`), `RESPONDER_API_KEY` is reused as the transcriber key unless `TRANSCRIBER_API_KEY` is set separately.
+When enabled, the OpenClaw dispatch plugin forwards audio metadata to the worker, the worker transcribes the voice note, then the normal guidance/profile flow answers the transcript. The transcriber can be an API provider or the optional local `whisper.cpp` server behind `codex-proxy`; see [Codex proxy](codex-proxy.md).
 
 ## Conversation Context
 

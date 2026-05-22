@@ -10,6 +10,7 @@ The main flow is OpenClaw-only. Twilio support is included as an experimental we
 - OpenClaw gateway: WhatsApp connection and delivery.
 - `openclaw-control`: local send endpoint for manual/test sends.
 - `openclaw-worker`: inbound policy/profile worker.
+- Optional `whisper-local`: local `whisper.cpp` transcription server for WhatsApp voice notes.
 - Optional Twilio webhook worker for sandbox testing.
 
 All managed process logs and pid files are written under `data/runtime/`.
@@ -63,6 +64,7 @@ On Linux, use `npm run warmup:linux` instead of `npm run warmup`.
 - OpenClaw gateway on `127.0.0.1:18789`
 - `openclaw-control` on `127.0.0.1:8788`
 - `openclaw-worker` on `127.0.0.1:8790`
+- optional `whisper-local` on `127.0.0.1:2022` when `WHISPER_LOCAL_ENABLED=true`
 
 To stop only processes started by the warmup manager:
 
@@ -84,7 +86,15 @@ Configure profiles and targets in `config/bot-policy.local.json`. Start from `co
 
 The example policy opens inbound visibility with `allowContacts=["*"]` and `allowGroups=true`, but keeps `defaults.mode="observe"`. That means unknown chats are visible to the worker but do not generate replies unless you add a target or intentionally change the defaults.
 
-Profiles can also opt into WhatsApp voice-note transcription with `voice.enabled=true`. Defaults keep voice disabled, and transcription requires `TRANSCRIBER_API_KEY` unless you are using direct API mode.
+Profiles can also opt into WhatsApp voice-note transcription with `voice.enabled=true`. Defaults keep voice disabled. Transcription can use an API provider through `codex-proxy` or a local `whisper.cpp` server:
+
+```text
+CODEX_PROXY_TRANSCRIBER_PROVIDER=local-whisper
+WHISPER_LOCAL_ENABLED=true
+WHISPER_LOCAL_MODEL=base
+```
+
+Run `npm run warmup:whisper` once to download the local binaries/model, or let `npm run warmup` start it when `WHISPER_LOCAL_ENABLED=true`.
 
 ## Manual Send
 
@@ -114,7 +124,7 @@ Direct API key mode:
 ```text
 CODEX_PROXY_ENABLED=false
 RESPONDER_BASE_URL=https://api.openai.com/v1
-RESPONDER_API_KEY=sk-your-api-key
+RESPONDER_API_KEY=your-api-key
 RESPONDER_MODEL=your-chat-completions-model
 ```
 
