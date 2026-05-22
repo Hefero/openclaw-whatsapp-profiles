@@ -8,6 +8,7 @@ import { runCodex, type CodexRunnerConfig } from './codex-runner.js';
 import {
   buildPrompt,
   chatCompletionRequestSchema,
+  type ToolPolicy,
   toChatCompletionResponse
 } from './openai-types.js';
 
@@ -21,6 +22,7 @@ const configSchema = z.object({
   timeoutMs: z.coerce.number().int().min(1000).default(120000),
   maxPromptChars: z.coerce.number().int().min(1000).default(20000),
   sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).default('read-only'),
+  allowWebSearch: z.coerce.boolean().default(true),
   workdir: z.string().default('.'),
   bin: z.string().default(process.platform === 'win32' ? 'codex.cmd' : 'codex')
 });
@@ -33,6 +35,7 @@ const serverConfig = configSchema.parse({
   timeoutMs: process.env.CODEX_PROXY_TIMEOUT_MS,
   maxPromptChars: process.env.CODEX_PROXY_MAX_PROMPT_CHARS,
   sandbox: process.env.CODEX_PROXY_SANDBOX,
+  allowWebSearch: process.env.CODEX_PROXY_ALLOW_WEB_SEARCH,
   workdir: process.env.CODEX_PROXY_WORKDIR,
   bin: process.env.CODEX_PROXY_CODEX_BIN
 });
@@ -41,6 +44,7 @@ const runnerConfig: CodexRunnerConfig = {
   bin: serverConfig.bin,
   model: serverConfig.model,
   sandbox: serverConfig.sandbox,
+  webSearch: false,
   timeoutMs: serverConfig.timeoutMs,
   workdir: path.resolve(serverConfig.workdir),
   maxPromptChars: serverConfig.maxPromptChars
@@ -84,6 +88,10 @@ function isAuthorized(request: http.IncomingMessage): boolean {
   return request.headers.authorization === `Bearer ${serverConfig.apiKey}`;
 }
 
+function headerEnabled(request: http.IncomingMessage, name: string): boolean {
+  return request.headers[name.toLowerCase()]?.toString().toLowerCase() === 'true';
+}
+
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? '127.0.0.1'}`);
@@ -92,7 +100,8 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         model: serverConfig.model,
-        sandbox: serverConfig.sandbox
+        sandbox: serverConfig.sandbox,
+        allowWebSearch: serverConfig.allowWebSearch
       });
       return;
     }
@@ -133,13 +142,18 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const prompt = buildPrompt(parsed);
+      const requestedTools: ToolPolicy = {
+        webSearch: serverConfig.allowWebSearch && headerEnabled(request, 'x-codex-proxy-web-search'),
+        localRead: headerEnabled(request, 'x-codex-proxy-local-read')
+      };
+      const prompt = buildPrompt(parsed, requestedTools);
       const model = parsed.model ?? serverConfig.model;
-      const result = await enqueue(() => runCodex(prompt, { ...runnerConfig, model }));
+      const result = await enqueue(() => runCodex(prompt, { ...runnerConfig, model, webSearch: requestedTools.webSearch }));
 
       logger.info(
         {
           model,
+          tools: requestedTools,
           durationMs: result.durationMs,
           stdoutBytes: Buffer.byteLength(result.stdout),
           stderrBytes: Buffer.byteLength(result.stderr)
@@ -175,6 +189,7 @@ server.listen(serverConfig.port, serverConfig.host, () => {
       url: `http://${serverConfig.host}:${serverConfig.port}`,
       model: serverConfig.model,
       sandbox: serverConfig.sandbox,
+      allowWebSearch: serverConfig.allowWebSearch,
       workdir: runnerConfig.workdir,
       bin: serverConfig.bin,
       authEnabled: Boolean(serverConfig.apiKey)

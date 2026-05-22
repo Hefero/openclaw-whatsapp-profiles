@@ -20,6 +20,12 @@ const guidanceProfileSchema = z.object({
   language: z.string().default('pt-BR'),
   tone: z.string().default('natural, breve e direto'),
   identityPolicy: z.enum(['masked', 'open']).default('masked'),
+  tools: z
+    .object({
+      webSearch: z.boolean().default(false),
+      localRead: z.boolean().default(false)
+    })
+    .default({}),
   instructions: z.array(z.string()).default([]),
   boundaries: z.array(z.string()).default([]),
   maxResponseChars: z.number().int().min(80).max(4000).default(700)

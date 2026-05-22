@@ -19,6 +19,10 @@ const fallbackProfile: GuidanceProfile = {
   language: 'pt-BR',
   tone: 'natural, breve e direto',
   identityPolicy: 'masked',
+  tools: {
+    webSearch: false,
+    localRead: false
+  },
   instructions: ['Responda como assistente pessoal, sem parecer atendimento comercial.'],
   boundaries: ['Nao assuma compromissos, pagamentos ou decisoes sensiveis sem revisao humana.'],
   maxResponseChars: 700
@@ -79,6 +83,7 @@ export function buildGuidancePrompt(
     `Idioma: ${profile.language}`,
     `Tom: ${profile.tone}`,
     `Politica de identidade: ${profile.identityPolicy}`,
+    `Ferramentas permitidas: webSearch=${profile.tools.webSearch}, localRead=${profile.tools.localRead}`,
     history,
     `Mensagem: ${text || '[sem texto extraivel]'}`,
     `Instrucoes: ${instructions.join(' ')}`,

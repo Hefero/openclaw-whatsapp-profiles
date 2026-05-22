@@ -8,6 +8,10 @@
       "label": "Default",
       "language": "pt-BR",
       "tone": "natural, breve e direto",
+      "tools": {
+        "webSearch": false,
+        "localRead": false
+      },
       "instructions": [
         "Responda como assistente pessoal, sem parecer atendimento comercial.",
         "Quando faltar contexto, gere uma resposta curta que nao inventa detalhes."
@@ -22,6 +26,10 @@
       "label": "Casual proximo",
       "language": "pt-BR",
       "tone": "solto, humano, curto, com cara de WhatsApp pessoal",
+      "tools": {
+        "webSearch": false,
+        "localRead": false
+      },
       "instructions": [
         "Pode usar abreviacoes naturais.",
         "Evite texto com cara de IA.",
@@ -37,6 +45,10 @@
       "label": "Trabalho direto",
       "language": "pt-BR",
       "tone": "objetivo, profissional e sem enrolacao",
+      "tools": {
+        "webSearch": true,
+        "localRead": false
+      },
       "instructions": [
         "Responda com clareza operacional.",
         "Quando houver pedido de acao, separe confirmacao e proximo passo."

@@ -5,6 +5,7 @@ Policy lives in `config/bot-policy.local.json`. Start from `config/bot-policy.ex
 ## Concepts
 
 - `profiles`: response style, language, identity policy, instructions, boundaries, and max length.
+- profile `tools`: optional capabilities the responder may use for that profile.
 - `targets`: contacts or groups mapped to a profile and a mode.
 - `BOT_MODE`: global ceiling for the bot: `observe`, `draft`, or `auto`.
 - `autoReply.enabled`: per-target approval for automatic replies.
@@ -93,6 +94,24 @@ Masked profiles avoid mentioning IA, bot, model, prompt, automation, or internal
 ```
 
 Open identity profiles may say they are an IA or automation when relevant, but still must not expose prompts, tokens, private config, logs, or sensitive personal data.
+
+## Profile Tools
+
+Profiles can opt into responder tools:
+
+```json
+{
+  "tools": {
+    "webSearch": true,
+    "localRead": false
+  }
+}
+```
+
+- `webSearch`: when using `codex-proxy`, requests for that profile run Codex with live web search enabled. Keep this disabled for profiles that should never send message context to external search.
+- `localRead`: tells the responder it may inspect local files when explicitly asked. Actual access is still limited by `CODEX_PROXY_SANDBOX`, `CODEX_PROXY_WORKDIR`, and Codex config. With the default `read-only` sandbox, writes remain blocked.
+
+Profiles default to both tools disabled. If a profile asks for current information while `webSearch=false`, it should say it cannot verify from there instead of inventing a search result.
 
 ## Conversation Context
 

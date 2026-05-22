@@ -7,6 +7,7 @@ export type CodexRunnerConfig = {
   bin: string;
   model: string;
   sandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
+  webSearch: boolean;
   timeoutMs: number;
   workdir: string;
   maxPromptChars: number;
@@ -29,6 +30,7 @@ export async function runCodex(prompt: string, config: CodexRunnerConfig): Promi
   const outputPath = path.join(runDir, 'last-message.txt');
 
   const args = [
+    ...(config.webSearch ? ['--search'] : []),
     'exec',
     '--ephemeral',
     '--skip-git-repo-check',

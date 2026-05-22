@@ -20,6 +20,11 @@ export const chatCompletionRequestSchema = z.object({
 
 export type ChatCompletionRequest = z.infer<typeof chatCompletionRequestSchema>;
 
+export type ToolPolicy = {
+  webSearch: boolean;
+  localRead: boolean;
+};
+
 function stringifyContent(content: ChatCompletionRequest['messages'][number]['content']): string {
   if (!content) {
     return '';
@@ -35,11 +40,34 @@ function stringifyContent(content: ChatCompletionRequest['messages'][number]['co
     .join('\n');
 }
 
-export function buildPrompt(request: ChatCompletionRequest): string {
+function buildToolInstruction(policy: ToolPolicy): string {
+  const instructions = ['You are acting as a local LLM provider behind an OpenAI-compatible API.'];
+
+  if (policy.webSearch) {
+    instructions.push(
+      'Live web search is enabled. Use it when the request needs current, external, or verifiable information. Do not claim you searched unless you actually used web search.'
+    );
+  } else {
+    instructions.push(
+      'Do not browse or use live web search. If the request needs current external information, say that you cannot verify it from here.'
+    );
+  }
+
+  if (policy.localRead) {
+    instructions.push(
+      'Read-only local file inspection is allowed when the request explicitly asks for local files and the sandbox permits it. Do not write, edit, move, or delete files.'
+    );
+  } else {
+    instructions.push('Do not run shell commands, inspect local files, edit files, or use local tools.');
+  }
+
+  instructions.push('Answer only the user request.', 'If the request asks for JSON, return only valid JSON.');
+  return instructions.join('\n');
+}
+
+export function buildPrompt(request: ChatCompletionRequest, toolPolicy: ToolPolicy): string {
   const lines = [
-    'You are acting as a local LLM provider behind an OpenAI-compatible API.',
-    'Do not edit files, run shell commands, browse, or use tools. Answer only the user request.',
-    'If the request asks for JSON, return only valid JSON.',
+    buildToolInstruction(toolPolicy),
     ''
   ];
 
