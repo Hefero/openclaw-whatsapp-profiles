@@ -96,6 +96,8 @@ WHISPER_LOCAL_MODEL=base
 
 Run `npm run warmup:whisper` once to download the local binaries/model, or let `npm run warmup` start it when `WHISPER_LOCAL_ENABLED=true`.
 
+See [Voice notes](docs/operations/voice-notes.md) for setup, testing, and troubleshooting.
+
 ## Manual Send
 
 ```bash
@@ -146,6 +148,7 @@ Twilio is not started by `warmup`; run it separately. Expose only `http://127.0.
 - [OpenClaw operations](docs/operations/openclaw.md)
 - [Guidance profiles](docs/operations/guidance-profiles.md)
 - [Codex proxy](docs/operations/codex-proxy.md)
+- [Voice notes](docs/operations/voice-notes.md)
 - [Hosting](docs/operations/hosting.md)
 - [Security](docs/security.md)
 - [Product direction](docs/product-direction.md)

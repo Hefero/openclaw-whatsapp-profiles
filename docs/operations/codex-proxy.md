@@ -99,6 +99,8 @@ npm run warmup
 
 On Windows, `warmup:whisper` downloads a portable `whisper.cpp` release, the `base` model, and a portable FFmpeg build under `data/whisper/`. Nothing from that directory should be committed.
 
+See [Voice notes](voice-notes.md) for the full operational test path and troubleshooting.
+
 OpenAI transcription path:
 
 ```text

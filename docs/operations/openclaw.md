@@ -22,6 +22,7 @@ The OpenClaw gateway must be paired with WhatsApp. Use the QR/pairing flow print
 - OpenClaw gateway: `127.0.0.1:18789`
 - `openclaw-control`: `http://127.0.0.1:8788/healthz`
 - `openclaw-worker`: `http://127.0.0.1:8790/healthz`
+- optional `whisper-local`: `127.0.0.1:2022` when `WHISPER_LOCAL_ENABLED=true`
 
 Logs and pid files are under `data/runtime/`.
 
@@ -31,7 +32,10 @@ Logs and pid files are under `data/runtime/`.
 npm run warmup
 npm run warmup:status
 npm run warmup:stop
+npm run warmup:whisper
 ```
+
+Use `warmup:whisper` to install/start the optional local Whisper server for voice notes. When `WHISPER_LOCAL_ENABLED=true`, `npm run warmup` starts it with the rest of the stack.
 
 ## Manual Send
 
@@ -71,5 +75,6 @@ Backups are written under `data/runtime/openclaw-config-backups/`.
 - If a profile uses web search and the worker produces a reply but WhatsApp gets nothing, check for `This operation was aborted` in `data/runtime/openclaw-gateway.log`; raise `WHATSAPP_ASSISTANT_DISPATCH_TIMEOUT_MS` if needed.
 - If sends fail, check the gateway status and `data/runtime/openclaw-gateway.log`.
 - If model calls fail, check `data/runtime/codex-proxy.log`.
+- If voice-note transcription fails, check `data/runtime/whisper-local.log` and [Voice notes](voice-notes.md).
 - If plugin setup fails, run `npm run openclaw:install-whatsapp`, `npm run openclaw:install-dispatch-plugin`, then `npm run openclaw:repair-config`.
 - Keep `codex-proxy` and worker endpoints bound to localhost unless you add private networking and authentication.
