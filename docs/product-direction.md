@@ -34,4 +34,4 @@ Twilio support in this repo is intentionally kept as an experimental adapter. It
 
 ## Boundary
 
-Do not let business-agent concerns complicate the current personal assistant before the OpenClaw flow is stable. The current repo should remain easy to run locally and safe by default.
+Do not let business-agent concerns complicate the current profile router before the OpenClaw flow is stable. The current repo should remain easy to run locally and safe by default.

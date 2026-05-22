@@ -1,6 +1,6 @@
-# WhatsApp Personal Assistant
+# OpenClaw WhatsApp Profiles
 
-Local-first WhatsApp assistant that runs through OpenClaw, applies per-contact or per-group policy profiles, and can generate drafts or controlled auto-replies.
+Local-first policy and guidance layer for OpenClaw WhatsApp. It applies per-contact or per-group profiles and can generate drafts or controlled auto-replies.
 
 The main flow is OpenClaw-only. Twilio support is included as an experimental webhook adapter for sandbox testing, not as the primary runtime.
 

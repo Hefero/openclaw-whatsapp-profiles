@@ -1,9 +1,9 @@
 {
-  "name": "whatsapp-personal-assistant",
+  "name": "openclaw-whatsapp-profiles",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local-first WhatsApp personal assistant powered by OpenClaw and policy profiles.",
+  "description": "OpenClaw WhatsApp policy and guidance profiles for contacts and groups.",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
