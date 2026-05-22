@@ -1,15 +1,21 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/core";
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:8790/openclaw/message";
-const DEFAULT_TIMEOUT_MS = 30000;
+const FALLBACK_TIMEOUT_MS = 120000;
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
 function numberValue(value, fallback) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
+
+const DEFAULT_TIMEOUT_MS = numberValue(
+  process.env.WHATSAPP_ASSISTANT_DISPATCH_TIMEOUT_MS,
+  FALLBACK_TIMEOUT_MS
+);
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

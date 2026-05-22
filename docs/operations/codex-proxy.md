@@ -52,6 +52,8 @@ RESPONDER_MODEL=gpt-5.4
 RESPONDER_TIMEOUT_MS=120000
 ```
 
+Keep `WHATSAPP_ASSISTANT_DISPATCH_TIMEOUT_MS` at least as high as the responder timeout. The OpenClaw dispatch hook is synchronous; if the hook times out first, the worker may finish a valid reply that OpenClaw no longer delivers.
+
 ## Use a Direct API Key
 
 To bypass `codex-proxy` and use a paid OpenAI-compatible API directly, set:

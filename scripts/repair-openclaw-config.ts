@@ -28,6 +28,10 @@ const raw = fs.readFileSync(configPath, 'utf8');
 const config = JSON.parse(raw) as Record<string, unknown>;
 const assistantModel = process.env.OPENCLAW_AGENTS_ASSISTANT_MODEL ?? 'openai-codex/gpt-5.4';
 const appConfig = loadConfig();
+const dispatchTimeoutMs = resolvePositiveInteger(
+  process.env.WHATSAPP_ASSISTANT_DISPATCH_TIMEOUT_MS,
+  120000
+);
 const openWhatsAppDms =
   process.env.OPENCLAW_WHATSAPP_DM_POLICY === 'open' ||
   process.env.OPENCLAW_WHATSAPP_ALLOW_ALL_DMS === 'true';
@@ -64,6 +68,11 @@ function normalizeWhatsAppTarget(value: string): string | undefined {
 
 function hasWildcard(values: string[]): boolean {
   return values.some((value) => value.trim() === '*');
+}
+
+function resolvePositiveInteger(value: string | undefined, fallback: number): number {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
 }
 
 function collectAllowedWhatsAppNumbers(): string[] {
@@ -228,10 +237,10 @@ if (dispatchConfig.endpoint !== 'http://127.0.0.1:8790/openclaw/message') {
   console.log('Set whatsapp-policy-dispatch endpoint');
 }
 
-if (dispatchConfig.timeoutMs !== 30000) {
-  dispatchConfig.timeoutMs = 30000;
+if (dispatchConfig.timeoutMs !== dispatchTimeoutMs) {
+  dispatchConfig.timeoutMs = dispatchTimeoutMs;
   changed = true;
-  console.log('Set whatsapp-policy-dispatch timeoutMs=30000');
+  console.log(`Set whatsapp-policy-dispatch timeoutMs=${dispatchTimeoutMs}`);
 }
 
 const agents = objectAt(config, 'agents');

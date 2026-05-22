@@ -57,6 +57,7 @@ This keeps the OpenClaw config aligned with the project policy:
 
 - WhatsApp channel enabled.
 - Local dispatch plugin enabled.
+- Local dispatch plugin timeout set from `WHATSAPP_ASSISTANT_DISPATCH_TIMEOUT_MS` (default `120000`).
 - Visible replies set to automatic.
 - Direct-message intake opened when `allowContacts` contains `*`.
 - Group intake opened when `allowGroups=true`.
@@ -67,6 +68,7 @@ Backups are written under `data/runtime/openclaw-config-backups/`.
 ## Troubleshooting
 
 - If inbound replies stop, run `npm run warmup:status` and check `data/runtime/openclaw-worker.log`.
+- If a profile uses web search and the worker produces a reply but WhatsApp gets nothing, check for `This operation was aborted` in `data/runtime/openclaw-gateway.log`; raise `WHATSAPP_ASSISTANT_DISPATCH_TIMEOUT_MS` if needed.
 - If sends fail, check the gateway status and `data/runtime/openclaw-gateway.log`.
 - If model calls fail, check `data/runtime/codex-proxy.log`.
 - If plugin setup fails, run `npm run openclaw:install-whatsapp`, `npm run openclaw:install-dispatch-plugin`, then `npm run openclaw:repair-config`.
