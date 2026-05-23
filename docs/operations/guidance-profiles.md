@@ -103,15 +103,29 @@ Profiles can opt into responder tools:
 {
   "tools": {
     "webSearch": true,
-    "localRead": false
+    "localRead": false,
+    "weather": true
   }
 }
 ```
 
 - `webSearch`: when using `codex-proxy`, requests for that profile run Codex with live web search enabled. Keep this disabled for profiles that should never send message context to external search.
 - `localRead`: tells the responder it may inspect local files when explicitly asked. Actual access is still limited by `CODEX_PROXY_SANDBOX`, `CODEX_PROXY_WORKDIR`, and Codex config. With the default `read-only` sandbox, writes remain blocked.
+- `weather`: lets the worker resolve weather requests through structured Open-Meteo forecast/geocoding calls before the responder runs. It uses a city in the message, decimal coordinates in the message, or WhatsApp shared-location fields (`LocationLat`/`LocationLon`) when OpenClaw provides them. If no location is available, the responder is instructed to ask for a city/bairro or a WhatsApp location instead of inventing a forecast.
 
-Profiles default to both tools disabled. If a profile asks for current information while `webSearch=false`, it should say it cannot verify from there instead of inventing a search result.
+Profiles default to tools disabled. If a profile asks for current information while the relevant tool is disabled, it should say it cannot verify from there instead of inventing a result.
+
+Weather lookup can be disabled globally with:
+
+```text
+WEATHER_ENABLED=false
+```
+
+Optional geocoding bias:
+
+```text
+WEATHER_GEOCODING_COUNTRY_CODE=BR
+```
 
 ## Typing Indicator
 

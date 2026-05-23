@@ -25,7 +25,8 @@ const fallbackProfile: GuidanceProfile = {
   },
   tools: {
     webSearch: false,
-    localRead: false
+    localRead: false,
+    weather: false
   },
   voice: {
     enabled: false,
@@ -70,7 +71,8 @@ export function buildGuidancePrompt(
   remoteJid: string,
   text: string,
   policy: BotPolicy,
-  conversationContext: Array<{ role: 'inbound' | 'outbound'; text: string }> = []
+  conversationContext: Array<{ role: 'inbound' | 'outbound'; text: string }> = [],
+  structuredContext: { weather?: string } = {}
 ): string {
   const guidance = resolveGuidance(remoteJid, policy);
   const label = guidance.target?.label ?? remoteJid;
@@ -93,8 +95,11 @@ export function buildGuidancePrompt(
     `Idioma: ${profile.language}`,
     `Tom: ${profile.tone}`,
     `Politica de identidade: ${profile.identityPolicy}`,
-    `Ferramentas permitidas: webSearch=${profile.tools.webSearch}, localRead=${profile.tools.localRead}`,
+    `Ferramentas permitidas: webSearch=${profile.tools.webSearch}, localRead=${profile.tools.localRead}, weather=${profile.tools.weather}`,
     `Audio permitido: voice=${profile.voice.enabled}, transcribe=${profile.voice.transcribe}, language=${profile.voice.language ?? 'auto'}`,
+    structuredContext.weather
+      ? `Contexto meteorologico estruturado:\n${structuredContext.weather}`
+      : 'Contexto meteorologico estruturado: [nenhum]',
     history,
     `Mensagem: ${text || '[sem texto extraivel]'}`,
     `Instrucoes: ${instructions.join(' ')}`,

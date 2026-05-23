@@ -29,7 +29,8 @@ const guidanceProfileSchema = z.object({
   tools: z
     .object({
       webSearch: z.boolean().default(false),
-      localRead: z.boolean().default(false)
+      localRead: z.boolean().default(false),
+      weather: z.boolean().default(false)
     })
     .default({}),
   voice: z
@@ -132,6 +133,15 @@ export type AppConfig = {
     model: string;
     timeoutMs: number;
   };
+  weather: {
+    enabled: boolean;
+    provider: 'open-meteo';
+    forecastBaseUrl: string;
+    geocodingBaseUrl: string;
+    geocodingLanguage: string;
+    geocodingCountryCode?: string;
+    timeoutMs: number;
+  };
   transcriber: {
     baseUrl: string;
     apiKey?: string;
@@ -164,6 +174,7 @@ export function loadConfig(): AppConfig {
     proxyTranscriberProvider === 'local-whisper'
       ? process.env.WHISPER_LOCAL_MODEL ?? 'base'
       : 'gpt-4o-mini-transcribe';
+  const weatherCountryCode = process.env.WEATHER_GEOCODING_COUNTRY_CODE?.trim().toUpperCase();
 
   return {
     mode: botModeSchema.parse(process.env.BOT_MODE ?? 'observe'),
@@ -184,6 +195,15 @@ export function loadConfig(): AppConfig {
         process.env.RESPONDER_MODEL ??
         (codexProxyEnabled ? process.env.CODEX_PROXY_MODEL ?? 'gpt-5.4' : 'gpt-4o-mini'),
       timeoutMs: Number(process.env.RESPONDER_TIMEOUT_MS ?? '120000')
+    },
+    weather: {
+      enabled: process.env.WEATHER_ENABLED !== 'false',
+      provider: 'open-meteo',
+      forecastBaseUrl: process.env.WEATHER_FORECAST_BASE_URL ?? 'https://api.open-meteo.com',
+      geocodingBaseUrl: process.env.WEATHER_GEOCODING_BASE_URL ?? 'https://geocoding-api.open-meteo.com',
+      geocodingLanguage: process.env.WEATHER_GEOCODING_LANGUAGE ?? 'pt',
+      geocodingCountryCode: weatherCountryCode || undefined,
+      timeoutMs: Number(process.env.WEATHER_TIMEOUT_MS ?? '8000')
     },
     transcriber: {
       baseUrl:

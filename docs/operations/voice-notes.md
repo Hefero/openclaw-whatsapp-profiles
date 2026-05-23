@@ -137,6 +137,8 @@ npm run warmup
 ## Troubleshooting
 
 - If `whisper-local` is unhealthy, check `data/runtime/whisper-local.log`.
+- If a voice note reaches the worker but the reply says it could not understand the audio, check `data/runtime/codex-proxy.log` for `fetch failed`. In local Whisper mode this usually means `codex-proxy` is healthy but `whisper-local` is not listening on `127.0.0.1:2022`; run `npm run warmup:whisper` and then `npm run warmup:status`.
+- If OpenClaw logs `Audio transcription failed (HTTP 401)` under `media-understanding`, that is OpenClaw's own channel media transcription path, not the worker's local Whisper path. The worker path is healthy when `whisper-local`, `codex-proxy`, and `openclaw-worker` are all healthy and the proxy smoke test returns JSON text.
 - If the log says FFmpeg is missing, rerun `npm run warmup:whisper`; on Windows the script downloads a portable FFmpeg.
 - If the worker says `voice disabled for profile`, enable `voice.enabled=true` on the active profile.
 - If the worker says `transcriber api key missing`, confirm `TRANSCRIBER_BASE_URL` points to `http://127.0.0.1:8787/v1` and `TRANSCRIBER_API_KEY` matches `CODEX_PROXY_API_KEY`.

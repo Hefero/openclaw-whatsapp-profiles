@@ -1,6 +1,7 @@
 import type { AppConfig, BotPolicy } from './config.js';
 import { buildGuidancePrompt, type ResolvedGuidance, resolveGuidance } from './guidance.js';
 import type { ConversationEntry } from './runtime-state.js';
+import type { WeatherPromptContext } from './weather.js';
 
 export type DraftInput = {
   remoteJid: string;
@@ -8,6 +9,7 @@ export type DraftInput = {
   policy: BotPolicy;
   responder: AppConfig['responder'];
   conversationContext?: ConversationEntry[];
+  weatherContext?: WeatherPromptContext;
 };
 
 type ChatCompletionResponse = {
@@ -80,14 +82,20 @@ export async function generateDraftReply(input: DraftInput): Promise<string> {
       : 'Nao use web search nem afirme que pesquisou na internet. Se faltarem dados atuais, diga isso de forma natural.',
     guidance.profile.tools.localRead
       ? 'Pode ler arquivos locais quando o provedor realmente tiver acesso local de leitura e isso for pedido explicitamente.'
-      : 'Nao tente ler arquivos ou pastas locais. Se pedirem acesso a arquivos, diga que nao consegue acessar dali.'
+      : 'Nao tente ler arquivos ou pastas locais. Se pedirem acesso a arquivos, diga que nao consegue acessar dali.',
+    guidance.profile.tools.weather
+      ? 'Quando houver contexto meteorologico estruturado, use esses dados como fonte de clima/previsao e inclua fonte, horario/base e confianca de forma curta. Nao troque por web search textual para clima.'
+      : 'Nao consulte previsao do tempo nem afirme ter dados meteorologicos atualizados.'
   ].join(' ');
 
   const prompt = buildGuidancePrompt(
     input.remoteJid,
     input.text,
     input.policy,
-    input.conversationContext ?? []
+    input.conversationContext ?? [],
+    {
+      weather: input.weatherContext?.prompt
+    }
   );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), input.responder.timeoutMs);

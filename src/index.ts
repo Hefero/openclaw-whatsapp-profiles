@@ -20,6 +20,7 @@ import {
   saveRuntimeState
 } from './runtime-state.js';
 import { type InboundMedia, transcribeVoiceMessage } from './transcriber.js';
+import { resolveWeatherPromptContext } from './weather.js';
 
 type InboundPayload = {
   type?: string;
@@ -687,6 +688,14 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     rememberConversationEntry(state, message.remoteJid, 'inbound', message.text);
     saveRuntimeState(state);
   }
+  const guidance = resolveGuidance(message.remoteJid, config.policy);
+  const weatherContext = guidance.profile.tools.weather
+    ? await resolveWeatherPromptContext({
+        text: message.text,
+        metadata: message.raw.context?.metadata,
+        weather: config.weather
+      })
+    : undefined;
 
   logger.info(
     {
@@ -694,7 +703,10 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       messageId: message.id,
       inputKind: message.inputKind,
       contextMessages: conversationContext.length,
-      textChars: message.text.length
+      textChars: message.text.length,
+      weatherStatus: weatherContext?.status,
+      weatherConfidence: weatherContext?.confidence,
+      weatherLocation: weatherContext?.locationLabel
     },
     'openclaw inbound message normalized'
   );
@@ -704,7 +716,8 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     text: message.text,
     policy: config.policy,
     responder: config.responder,
-    conversationContext
+    conversationContext,
+    weatherContext
   });
 
   if (decision.action === 'draft') {
@@ -788,6 +801,8 @@ const server = http.createServer(async (request, response) => {
           twilioWebhookPath,
           responderModel: config.responder.model,
           responderBaseUrl: config.responder.baseUrl,
+          weatherEnabled: config.weather.enabled,
+          weatherProvider: config.weather.provider,
           transcriberModel: config.transcriber.model,
           transcriberConfigured: Boolean(config.transcriber.apiKey)
         });

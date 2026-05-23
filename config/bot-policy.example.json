@@ -14,7 +14,8 @@
       },
       "tools": {
         "webSearch": false,
-        "localRead": false
+        "localRead": false,
+        "weather": false
       },
       "voice": {
         "enabled": false,
@@ -42,7 +43,8 @@
       },
       "tools": {
         "webSearch": false,
-        "localRead": false
+        "localRead": false,
+        "weather": true
       },
       "voice": {
         "enabled": false,
@@ -71,7 +73,8 @@
       },
       "tools": {
         "webSearch": true,
-        "localRead": false
+        "localRead": false,
+        "weather": true
       },
       "voice": {
         "enabled": false,

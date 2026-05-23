@@ -65,6 +65,11 @@ function firstStringFromArray(value) {
   return Array.isArray(value) ? value.find((item) => typeof item === "string" && item.trim()) ?? "" : "";
 }
 
+function numberFromValue(value) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : undefined;
+}
+
 function resolveCtxString(ctx, ...keys) {
   for (const key of keys) {
     const value = stringValue(ctx?.[key]) || firstStringFromArray(ctx?.[key]);
@@ -74,6 +79,24 @@ function resolveCtxString(ctx, ...keys) {
   }
 
   return "";
+}
+
+function resolveCtxNumber(ctx, ...keys) {
+  for (const key of keys) {
+    const direct = numberFromValue(ctx?.[key]);
+    if (direct !== undefined) {
+      return direct;
+    }
+
+    const arrayValue = Array.isArray(ctx?.[key])
+      ? ctx[key].map(numberFromValue).find((value) => value !== undefined)
+      : undefined;
+    if (arrayValue !== undefined) {
+      return arrayValue;
+    }
+  }
+
+  return undefined;
 }
 
 function isGroupId(value) {
@@ -115,6 +138,13 @@ function buildWorkerPayloadFromReplyDispatch(event) {
   const mediaType = resolveCtxString(msgCtx, "MediaType", "MediaTypes");
   const mediaFileName = resolveCtxString(msgCtx, "MediaFileName", "FileName");
   const transcript = resolveCtxString(msgCtx, "Transcript");
+  const locationLat = resolveCtxNumber(msgCtx, "LocationLat", "LocationLatitude");
+  const locationLon = resolveCtxNumber(msgCtx, "LocationLon", "LocationLng", "LocationLongitude");
+  const locationAccuracy = resolveCtxNumber(msgCtx, "LocationAccuracy");
+  const locationName = resolveCtxString(msgCtx, "LocationName");
+  const locationAddress = resolveCtxString(msgCtx, "LocationAddress");
+  const locationSource = resolveCtxString(msgCtx, "LocationSource");
+  const locationCaption = resolveCtxString(msgCtx, "LocationCaption");
   const sessionGroupId = resolveGroupIdFromSessionKey(sessionKey);
   const groupId = resolveGroupId(
     msgCtx.OriginatingTo,
@@ -163,7 +193,14 @@ function buildWorkerPayloadFromReplyDispatch(event) {
         mediaUrl,
         mediaType,
         mediaFileName,
-        transcript
+        transcript,
+        LocationLat: locationLat,
+        LocationLon: locationLon,
+        LocationAccuracy: locationAccuracy,
+        LocationName: locationName,
+        LocationAddress: locationAddress,
+        LocationSource: locationSource,
+        LocationCaption: locationCaption
       }
     }
   };
