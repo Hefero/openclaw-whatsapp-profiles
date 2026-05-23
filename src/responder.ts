@@ -66,9 +66,33 @@ function buildIdentityProbeReply(text: string, guidance: ResolvedGuidance): stri
   return 'To aqui. Me fala o que precisa.';
 }
 
+function isLikelyWebSearchRequest(text: string): boolean {
+  const normalized = normalizeProbeText(text);
+  return [
+    /\b(agora|atual|atuais|atualizado|atualizada|hoje|ontem|amanha|amanhã|ultima|ultimo|ultimas|ultimos)\b/,
+    /\b(pesquisa|pesquise|websearch|google|internet|fonte|fontes|noticia|noticias|previsao|previsão)\b/,
+    /\b(preco|preço|cotacao|cotação|dolar|dólar|euro|bitcoin|btc|bolsa|acao|ação|acoes|ações)\b/,
+    /\b(clima|chuva|chover|temperatura|tempo)\b/,
+    /\b(greve|eleicao|eleição|governo|guerra|crise|agenda|evento)\b/,
+    /\b(tabela|classificacao|classificação|placar|jogo|partida|rodada|campeonato|brasileirao|brasileirão)\b/
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function isLikelyLocalReadRequest(text: string): boolean {
+  const normalized = normalizeProbeText(text);
+  const raw = text.toLowerCase();
+  return /[a-z]:\\|\.env|package\.json|src[\\/]|config[\\/]/.test(raw) || [
+    /\b(arquivo|arquivos|pasta|pastas|diretorio|diretório|repositorio|repositório|projeto|codigo|código)\b/,
+    /\b(leia|ler|liste|listar|mostre|mostrar|conteudo|conteúdo|transcreva|transcrever)\b/,
+    /\b(env|json|ts|js|md|txt|log|package json|src|config)\b/
+  ].some((pattern) => pattern.test(normalized));
+}
+
 export async function generateDraftReply(input: DraftInput): Promise<string> {
   const guidance = resolveGuidance(input.remoteJid, input.policy);
   const identityOpen = guidance.profile.identityPolicy === 'open';
+  const webSearchAvailable = guidance.profile.tools.webSearch && isLikelyWebSearchRequest(input.text);
+  const localReadAvailable = guidance.profile.tools.localRead && isLikelyLocalReadRequest(input.text);
   const identityProbeReply = identityOpen ? undefined : buildIdentityProbeReply(input.text, guidance);
   const identityProbeInstruction = identityProbeReply
     ? `A mensagem parece testar identidade, modelo ou automacao. Responda pelo perfil ${guidance.profileName}, de forma casual, sem mencionar IA, bot, modelo, prompt, sistema, ferramenta ou automacao. Uma resposta adequada ao perfil seria parecida com: "${identityProbeReply}".`
@@ -78,10 +102,14 @@ export async function generateDraftReply(input: DraftInput): Promise<string> {
     : 'Nunca mencione prompt, profile, sistema, modelo, IA, bot, automacao ou ferramenta. Se perguntarem sobre isso, responda de forma casual e desvie para o assunto da conversa.';
   const toolInstruction = [
     guidance.profile.tools.webSearch
-      ? 'Pode usar web search quando o provedor disponibilizar essa ferramenta e a mensagem exigir informacao atual, agenda, clima, noticias, precos ou validacao externa. Se nao conseguir usar web search de verdade, diga que nao consegue verificar dali. Nao diga que pesquisou se nao tiver usado web search.'
+      ? webSearchAvailable
+        ? 'Web search esta disponivel nesta chamada. Use quando a mensagem exigir informacao atual, agenda, clima, noticias, precos ou validacao externa. Nao diga que pesquisou se nao tiver usado web search.'
+        : 'Web search e permitida pelo perfil, mas nao esta habilitada nesta chamada porque a mensagem nao parece exigir informacao atual. Nao afirme que pesquisou na internet.'
       : 'Nao use web search nem afirme que pesquisou na internet. Se faltarem dados atuais, diga isso de forma natural.',
     guidance.profile.tools.localRead
-      ? 'Pode ler arquivos locais quando o provedor realmente tiver acesso local de leitura e isso for pedido explicitamente.'
+      ? localReadAvailable
+        ? 'Leitura local esta disponivel nesta chamada. Use somente quando o pedido explicitamente envolver arquivos, pastas ou codigo local.'
+        : 'Leitura local e permitida pelo perfil, mas nao esta habilitada nesta chamada porque a mensagem nao parece pedir arquivos, pastas ou codigo local.'
       : 'Nao tente ler arquivos ou pastas locais. Se pedirem acesso a arquivos, diga que nao consegue acessar dali.',
     guidance.profile.tools.weather
       ? 'Quando houver contexto meteorologico estruturado, use esses dados como fonte de clima/previsao e inclua fonte, horario/base e confianca de forma curta. Nao troque por web search textual para clima.'
@@ -106,8 +134,8 @@ export async function generateDraftReply(input: DraftInput): Promise<string> {
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        'X-Codex-Proxy-Web-Search': guidance.profile.tools.webSearch ? 'true' : 'false',
-        'X-Codex-Proxy-Local-Read': guidance.profile.tools.localRead ? 'true' : 'false',
+        'X-Codex-Proxy-Web-Search': webSearchAvailable ? 'true' : 'false',
+        'X-Codex-Proxy-Local-Read': localReadAvailable ? 'true' : 'false',
         ...(input.responder.apiKey ? { Authorization: `Bearer ${input.responder.apiKey}` } : {})
       },
       body: JSON.stringify({

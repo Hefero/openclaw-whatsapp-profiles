@@ -8,6 +8,10 @@
       "label": "Default",
       "language": "pt-BR",
       "tone": "natural, breve e direto",
+      "retroactiveReply": {
+        "enabled": false,
+        "maxAgeHours": 12
+      },
       "typing": {
         "enabled": true,
         "intervalMs": 7000
@@ -107,6 +111,10 @@
         "requireDirectReply": false,
         "maxRepliesPerHour": 5
       },
+      "retroactiveReply": {
+        "enabled": false,
+        "maxAgeHours": 12
+      },
       "context": {
         "enabled": true,
         "maxMessages": 8,
@@ -127,6 +135,10 @@
         "requireMention": true,
         "requireDirectReply": false,
         "maxRepliesPerHour": 5
+      },
+      "retroactiveReply": {
+        "enabled": false,
+        "maxAgeHours": 12
       },
       "context": {
         "enabled": true,

@@ -15,11 +15,22 @@ const quietHoursSchema = z.object({
   timezone: z.string().default('America/Sao_Paulo')
 });
 
+const retroactiveReplySchema = z.object({
+  enabled: z.boolean().default(false),
+  maxAgeHours: z.number().min(0.1).max(168).default(12)
+});
+
+const retroactiveReplyOverrideSchema = z.object({
+  enabled: z.boolean().optional(),
+  maxAgeHours: z.number().min(0.1).max(168).optional()
+});
+
 const guidanceProfileSchema = z.object({
   label: z.string().optional(),
   language: z.string().default('pt-BR'),
   tone: z.string().default('natural, breve e direto'),
   identityPolicy: z.enum(['masked', 'open']).default('masked'),
+  retroactiveReply: retroactiveReplySchema.default({}),
   typing: z
     .object({
       enabled: z.boolean().default(true),
@@ -76,6 +87,7 @@ const targetSchema = z.object({
   mode: targetModeSchema.default('observe'),
   enabled: z.boolean().default(true),
   autoReply: targetAutoReplySchema.default({}),
+  retroactiveReply: retroactiveReplyOverrideSchema.default({}),
   context: conversationContextOverrideSchema.default({})
 });
 

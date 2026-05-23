@@ -108,6 +108,8 @@ Profiles default to showing WhatsApp's native typing indicator while an automati
 
 Profiles can opt into structured weather lookup with `tools.weather=true`. Weather requests are resolved by the worker with Open-Meteo using, in order, WhatsApp shared-location coordinates from OpenClaw metadata, decimal coordinates in the message, or a city/bairro detected in the text. If no location is available, the responder asks for one instead of using web search or guessing.
 
+Profiles can opt into retroactive replies with `retroactiveReply.enabled=true`. The worker scans recent OpenClaw history for configured auto-reply targets and answers the latest inbound message that has no later own reply; `retroactiveReply.maxAgeHours` defaults to `12`.
+
 Profiles can also opt into WhatsApp voice-note transcription with `voice.enabled=true`. Defaults keep voice disabled. Direct API mode can transcribe with the same provider credentials; local transcription uses `codex-proxy` plus a `whisper.cpp` server:
 
 ```text

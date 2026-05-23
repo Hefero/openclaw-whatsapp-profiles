@@ -10,6 +10,7 @@ Policy lives in `config/bot-policy.local.json`. Start from `config/bot-policy.ex
 - `BOT_MODE`: global ceiling for the bot: `observe`, `draft`, or `auto`.
 - `autoReply.enabled`: per-target approval for automatic replies.
 - `autoReply.maxRepliesPerHour`: optional per-target override for the global hourly cap.
+- `retroactiveReply`: opt-in catch-up for recent unanswered OpenClaw history.
 - `conversationContext`: recent per-chat context passed to the responder.
 - target `context`: optional override for that contact or group.
 - `allowContacts`: accepts exact JIDs or `*` to let the worker see all direct chats.
@@ -143,6 +144,31 @@ Profiles show WhatsApp's native typing indicator by default while an automatic r
 The dispatch plugin asks the worker for a fast typing policy before the full responder call. It only starts the indicator when the message is eligible for auto-reply and delivery is not already blocked by policy. Draft/observe/blocked messages stay silent so chats do not see "typing" without receiving a reply.
 
 Set `typing.enabled=false` on sensitive or low-priority profiles. Keep `intervalMs` below WhatsApp's presence expiry window; `7000` is the recommended default.
+
+## Retroactive Replies
+
+Profiles can opt into replying to recent messages that are already in OpenClaw history but did not get a later `fromMe` reply:
+
+```json
+{
+  "retroactiveReply": {
+    "enabled": true,
+    "maxAgeHours": 12
+  }
+}
+```
+
+`maxAgeHours` defaults to `12` when omitted. A target can override the inherited profile setting:
+
+```json
+{
+  "retroactiveReply": {
+    "enabled": false
+  }
+}
+```
+
+The worker scans configured targets with `OPENCLAW_READ_LIMIT` and `OPENCLAW_POLL_INTERVAL_MS`. It only sends when the normal automatic reply gates also pass: `BOT_MODE=auto`, target mode `auto`, `autoReply.enabled=true`, delivery gate, quiet hours, and rate limits. The scanner answers only the latest inbound message after the last own WhatsApp message in that target history.
 
 ## Voice Messages
 

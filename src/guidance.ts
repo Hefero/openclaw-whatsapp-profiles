@@ -19,6 +19,10 @@ const fallbackProfile: GuidanceProfile = {
   language: 'pt-BR',
   tone: 'natural, breve e direto',
   identityPolicy: 'masked',
+  retroactiveReply: {
+    enabled: false,
+    maxAgeHours: 12
+  },
   typing: {
     enabled: true,
     intervalMs: 7000

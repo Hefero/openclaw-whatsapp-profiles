@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export type OpenClawMessage = {
   id: string;
@@ -83,6 +83,67 @@ function runCommand(command: string, args: string[], env: NodeJS.ProcessEnv): Ru
   };
 }
 
+function isUnavailable(result: { error?: NodeJS.ErrnoException; stdout: string; stderr: string }): boolean {
+  const output = `${result.stdout}\n${result.stderr}`;
+  return (
+    result.error?.code === 'ENOENT' ||
+    output.includes('nÃ£o Ã© reconhecido') ||
+    output.includes('nao e reconhecido') ||
+    output.includes('is not recognized')
+  );
+}
+
+function runCommandAsync(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number
+): Promise<RunResult> {
+  return new Promise((resolve) => {
+    const child =
+      process.platform === 'win32'
+        ? spawn('cmd', ['/c', command, ...args], {
+            env,
+            windowsHide: true
+          })
+        : spawn(command, args, {
+            env
+          });
+    let stdout = '';
+    let stderr = '';
+    let error: NodeJS.ErrnoException | undefined;
+    let timedOut = false;
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeoutMs);
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', (childError: NodeJS.ErrnoException) => {
+      error = childError;
+    });
+    child.on('close', (status) => {
+      clearTimeout(timeout);
+      const timeoutMessage = timedOut ? `openclaw command timed out after ${timeoutMs}ms` : '';
+      const finalStderr = [stderr, timeoutMessage].filter(Boolean).join('\n');
+      resolve({
+        status: timedOut ? 1 : status ?? 1,
+        stdout,
+        stderr: finalStderr,
+        unavailable: isUnavailable({ error, stdout, stderr: finalStderr })
+      });
+    });
+  });
+}
+
 function runNpx(args: string[], env: NodeJS.ProcessEnv): RunResult {
   const cacheDir = path.join(process.cwd(), '.tmp-npm-cache');
   const npxPackage = process.env.OPENCLAW_NPX_PACKAGE ?? 'openclaw@latest';
@@ -91,6 +152,14 @@ function runNpx(args: string[], env: NodeJS.ProcessEnv): RunResult {
   return process.platform === 'win32'
     ? runCommand('npx', npxArgs, { ...env, NPM_CONFIG_CACHE: cacheDir })
     : runCommand('npx', npxArgs, { ...env, NPM_CONFIG_CACHE: cacheDir });
+}
+
+function runNpxAsync(args: string[], env: NodeJS.ProcessEnv, timeoutMs: number): Promise<RunResult> {
+  const cacheDir = path.join(process.cwd(), '.tmp-npm-cache');
+  const npxPackage = process.env.OPENCLAW_NPX_PACKAGE ?? 'openclaw@latest';
+  const npxArgs = ['--yes', '--cache', cacheDir, '--package', npxPackage, 'openclaw', ...args];
+
+  return runCommandAsync('npx', npxArgs, { ...env, NPM_CONFIG_CACHE: cacheDir }, timeoutMs);
 }
 
 export function runOpenClaw(args: string[]): RunResult {
@@ -105,6 +174,21 @@ export function runOpenClaw(args: string[]): RunResult {
   }
 
   return runNpx(args, env);
+}
+
+export async function runOpenClawAsync(args: string[]): Promise<RunResult> {
+  const env = {
+    ...process.env,
+    NPM_CONFIG_CACHE: path.join(process.cwd(), '.tmp-npm-cache')
+  };
+  const timeoutMs = Number(process.env.OPENCLAW_COMMAND_TIMEOUT_MS ?? '30000');
+
+  const direct = await runCommandAsync(resolveOpenClawCommand(), args, env, timeoutMs);
+  if (direct.status === 0 || !direct.unavailable) {
+    return direct;
+  }
+
+  return runNpxAsync(args, env, timeoutMs);
 }
 
 function extractFirstJson(value: string): unknown {
@@ -178,6 +262,10 @@ function getBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
+function getNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function collectMessageLike(value: unknown): unknown[] {
   if (Array.isArray(value)) {
     return value;
@@ -240,7 +328,19 @@ function normalizeMessage(value: unknown, target: string): OpenClawMessage | und
     target,
     text,
     fromMe: getBoolean(obj.fromMe) ?? getBoolean(key?.fromMe) ?? false,
-    timestamp: getString(obj.timestamp) ?? getString(obj.createdAt) ?? getString(payload?.timestamp),
+    timestamp:
+      getNumber(obj.timestamp) ??
+      getString(obj.timestamp) ??
+      getNumber(obj.messageTimestamp) ??
+      getString(obj.messageTimestamp) ??
+      getNumber(obj.createdAt) ??
+      getString(obj.createdAt) ??
+      getNumber(key?.timestamp) ??
+      getString(key?.timestamp) ??
+      getNumber(payload?.timestamp) ??
+      getString(payload?.timestamp) ??
+      getNumber(payload?.createdAt) ??
+      getString(payload?.createdAt),
     raw: value
   };
 }
@@ -268,8 +368,59 @@ export function readOpenClawMessages(target: string, limit: number): OpenClawMes
     .filter((item): item is OpenClawMessage => Boolean(item));
 }
 
+export async function readOpenClawMessagesAsync(target: string, limit: number): Promise<OpenClawMessage[]> {
+  const result = await runOpenClawAsync([
+    'message',
+    'read',
+    '--channel',
+    'whatsapp',
+    '--target',
+    target,
+    '--limit',
+    String(limit),
+    '--json'
+  ]);
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `openclaw message read failed (${result.status})`);
+  }
+
+  const parsed = extractFirstJson(result.stdout);
+  return collectMessageLike(parsed)
+    .map((item) => normalizeMessage(item, target))
+    .filter((item): item is OpenClawMessage => Boolean(item));
+}
+
 export function sendOpenClawMessage(target: string, message: string): OpenClawSendResult {
   const result = runOpenClaw([
+    'message',
+    'send',
+    '--channel',
+    'whatsapp',
+    '--target',
+    target,
+    '--message',
+    message,
+    '--json'
+  ]);
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `openclaw message send failed (${result.status})`);
+  }
+
+  const parsed = extractFirstJson(result.stdout);
+  const obj = getObject(parsed);
+  const payload = getObject(obj?.payload);
+  const inner = getObject(payload?.result);
+
+  return {
+    messageId: getString(inner?.messageId) ?? getString(obj?.messageId),
+    raw: parsed
+  };
+}
+
+export async function sendOpenClawMessageAsync(target: string, message: string): Promise<OpenClawSendResult> {
+  const result = await runOpenClawAsync([
     'message',
     'send',
     '--channel',

@@ -8,6 +8,7 @@ import { decideDelivery } from './delivery-gate.js';
 import { resolveConversationContext, resolveGuidance } from './guidance.js';
 import { decideMessageAction } from './policy.js';
 import { generateDraftReply } from './responder.js';
+import { hasRetroactiveReplyTargets, runRetroactiveReplyScan } from './retroactive-replies.js';
 import {
   getConversationContext,
   hasSeen,
@@ -73,6 +74,7 @@ const workerProcessName = process.env.WORKER_PROCESS_NAME ?? 'openclaw-worker';
 const workerProcessArgs = (process.env.WORKER_PROCESS_ARGS ?? 'run openclaw:worker').split(' ');
 const workerPidPath = path.resolve('data', 'runtime', `${workerProcessName}.pid.json`);
 const logReplyContent = process.env.BOT_LOG_REPLY_CONTENT === 'true';
+let retroactiveReplyScanInFlight = false;
 
 function registerWorkerProcess(): void {
   const runtimeDir = path.dirname(workerPidPath);
@@ -92,6 +94,41 @@ function registerWorkerProcess(): void {
       2
     )
   );
+}
+
+function startRetroactiveReplyScanner(): void {
+  const intervalMs = Number.isFinite(startupConfig.openclaw.pollIntervalMs)
+    ? Math.max(5000, startupConfig.openclaw.pollIntervalMs)
+    : 10000;
+
+  const runScan = async (): Promise<void> => {
+    const config = loadConfig();
+    if (!hasRetroactiveReplyTargets(config)) {
+      return;
+    }
+
+    if (retroactiveReplyScanInFlight) {
+      logger.debug('retroactive reply scan skipped because previous scan is still running');
+      return;
+    }
+
+    retroactiveReplyScanInFlight = true;
+    try {
+      await runRetroactiveReplyScan(config, logger);
+    } finally {
+      retroactiveReplyScanInFlight = false;
+    }
+  };
+
+  const timer = setInterval(() => {
+    void runScan().catch((error) => {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'retroactive reply scan failed'
+      );
+    });
+  }, intervalMs);
+  timer.unref?.();
 }
 
 function getString(value: unknown): string | undefined {
@@ -605,6 +642,7 @@ function resolveTypingPolicyForInbound(payload: InboundPayload): TypingPolicyRes
 }
 
 async function handleInbound(payload: InboundPayload): Promise<unknown> {
+  const handlerStartedAt = Date.now();
   const config = loadConfig();
 
   if (payload.context?.channelId !== 'whatsapp') {
@@ -667,12 +705,14 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     },
     'openclaw inbound policy decision'
   );
+  const decisionAt = Date.now();
 
   if (decision.action !== 'draft' && decision.action !== 'auto') {
     return { ok: true, action: decision.action, reasons: decision.reasons };
   }
 
   const resolvedMessage = await resolveMessageFromSeed(seed, config);
+  const normalizedAt = Date.now();
   if ('ignored' in resolvedMessage) {
     logger.info(
       { target: targetLabel, messageId: seed.id, reason: resolvedMessage.reason },
@@ -689,6 +729,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     saveRuntimeState(state);
   }
   const guidance = resolveGuidance(message.remoteJid, config.policy);
+  const weatherStartedAt = Date.now();
   const weatherContext = guidance.profile.tools.weather
     ? await resolveWeatherPromptContext({
         text: message.text,
@@ -696,6 +737,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
         weather: config.weather
       })
     : undefined;
+  const weatherFinishedAt = Date.now();
 
   logger.info(
     {
@@ -711,6 +753,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     'openclaw inbound message normalized'
   );
 
+  const responderStartedAt = Date.now();
   const reply = await generateDraftReply({
     remoteJid: message.remoteJid,
     text: message.text,
@@ -719,6 +762,20 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     conversationContext,
     weatherContext
   });
+  const responderFinishedAt = Date.now();
+
+  logger.info(
+    {
+      target: targetLabel,
+      messageId: message.id,
+      inputKind: message.inputKind,
+      resolveMessageMs: normalizedAt - decisionAt,
+      weatherMs: weatherFinishedAt - weatherStartedAt,
+      responderMs: responderFinishedAt - responderStartedAt,
+      totalMs: responderFinishedAt - handlerStartedAt
+    },
+    'openclaw inbound timings'
+  );
 
   if (decision.action === 'draft') {
     logger.info(
@@ -887,4 +944,5 @@ server.listen(port, host, () => {
     },
     'WhatsApp inbound bridge listening'
   );
+  startRetroactiveReplyScanner();
 });
