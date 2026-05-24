@@ -116,7 +116,7 @@ Profiles can opt into responder tools:
 - `localRead`: tells the responder it may inspect local files when explicitly asked. Actual access is still limited by `CODEX_PROXY_SANDBOX`, `CODEX_PROXY_WORKDIR`, and Codex config. With the default `read-only` sandbox, writes remain blocked.
 - `weather`: lets the worker resolve weather requests through structured Open-Meteo forecast/geocoding calls before the responder runs. It uses a city in the message, decimal coordinates in the message, or WhatsApp shared-location fields (`LocationLat`/`LocationLon`) when OpenClaw provides them. If no location is available, the responder is instructed to ask for a city/bairro or a WhatsApp location instead of inventing a forecast.
 - `imageGeneration`: lets the worker detect image creation requests, call the configured Image API, save the generated image under `MEDIA_OUTPUT_DIR`, and send it with `openclaw message send --media`.
-- `stickerGeneration`: lets the worker detect WhatsApp sticker/figurinha requests, generate an image, remove chroma-key or near-white backgrounds during conversion, write a 512x512 WebP sticker with FFmpeg, and send it through OpenClaw's WhatsApp `upload-file` action as a native sticker.
+- `stickerGeneration`: lets the worker detect WhatsApp sticker/figurinha requests, generate an image, remove chroma-key backgrounds during conversion, clean transparent pixels with Pillow, write a 512x512 exact-alpha WebP sticker, and send it through OpenClaw's WhatsApp `upload-file` action as a native sticker.
 
 Profiles default to tools disabled. If a profile asks for current information while the relevant tool is disabled, it should say it cannot verify from there instead of inventing a result.
 

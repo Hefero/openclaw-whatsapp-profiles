@@ -1,8 +1,18 @@
 # OpenClaw WhatsApp Profiles
 
-Local-first policy and guidance layer for OpenClaw WhatsApp. It applies per-contact or per-group profiles and can generate drafts or controlled auto-replies.
+Local-first policy and guidance layer for OpenClaw WhatsApp. It applies per-contact or per-group profiles and can generate drafts, controlled auto-replies, images, stickers, voice-note transcriptions, and audio replies.
 
 The main flow is OpenClaw-only. Twilio support is included as an experimental webhook adapter for sandbox testing, not as the primary runtime.
+
+## Capabilities
+
+- Per-contact and per-group profiles with `observe`, `draft`, or gated `auto` replies.
+- WhatsApp voice-note transcription with direct API transcription or local `whisper.cpp`.
+- Structured weather lookup through Open-Meteo using WhatsApp shared locations, coordinates, or city/bairro text.
+- Image generation, profile-gated with `tools.imageGeneration=true`, delivered as WhatsApp media.
+- Native WhatsApp sticker generation, profile-gated with `tools.stickerGeneration=true`, delivered through OpenClaw as `asSticker=true`.
+- Audio replies, profile-gated with `voice.reply.enabled=true`, either on request or for every reply.
+- Optional `codex-proxy` for local Codex CLI-backed responses, Codex image generation, local TTS, and local Whisper forwarding.
 
 ## What It Runs
 
@@ -40,6 +50,16 @@ Edit `.env` and set:
 RESPONDER_API_KEY=your-api-key
 RESPONDER_MODEL=gpt-4o-mini
 ```
+
+Optional media setup:
+
+```bash
+npm run media:install
+npm run tts:install
+npm run warmup:whisper
+```
+
+Then opt profiles into the capabilities you want in `config/bot-policy.local.json`, for example `tools.imageGeneration=true`, `tools.stickerGeneration=true`, `voice.enabled=true`, or `voice.reply.enabled=true`. See [Guidance profiles](docs/operations/guidance-profiles.md) and [Codex proxy](docs/operations/codex-proxy.md) for the provider-specific environment variables.
 
 Then start:
 

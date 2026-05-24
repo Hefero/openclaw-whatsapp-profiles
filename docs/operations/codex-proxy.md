@@ -172,7 +172,7 @@ Install the optional Python packages with `npm run tts:install`. The Edge backen
 
 Sticker requests are profile-gated with `tools.stickerGeneration=true`. The worker routes sticker intent before normal image intent, uses the configured image provider, and then converts the generated source image into a native WhatsApp sticker.
 
-The sticker prompt asks the image provider for a flat `#00ff00` chroma-key background. Conversion removes that chroma key and also removes near-white backgrounds conservatively, because image models sometimes ignore transparency/chroma instructions and return white or off-white sticker backgrounds. The output is a 512x512 WebP with alpha when FFmpeg can preserve transparency.
+The sticker prompt asks the image provider for a flat `#00ff00` chroma-key background. Conversion removes that chroma key with FFmpeg, cleans low-alpha pixels with Pillow, and saves a 512x512 lossless WebP with exact alpha so WhatsApp clients do not show chroma-key color in transparent areas.
 
 Required pieces:
 
