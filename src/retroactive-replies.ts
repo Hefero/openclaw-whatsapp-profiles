@@ -20,7 +20,7 @@ import {
   saveRuntimeState,
   type ConversationEntry
 } from './runtime-state.js';
-import { resolveWeatherPromptContext } from './weather.js';
+import { buildWeatherLookupText, resolveWeatherPromptContext } from './weather.js';
 
 type RetroactiveLogger = Pick<Logger, 'debug' | 'info' | 'warn'>;
 
@@ -199,9 +199,15 @@ async function processRetroactiveTarget(
 
   const contextSettings = resolveConversationContext(target.id, config.policy);
   const conversationContext = historyContext(messages, thread.candidate, contextSettings);
+  const weatherLookupText = buildWeatherLookupText({
+    text: thread.candidate.message.text,
+    metadata: undefined,
+    conversationContext,
+    now: new Date(thread.candidate.timeMs)
+  });
   const weatherContext = guidance.profile.tools.weather
     ? await resolveWeatherPromptContext({
-        text: thread.candidate.message.text,
+        text: weatherLookupText,
         metadata: undefined,
         weather: config.weather
       })

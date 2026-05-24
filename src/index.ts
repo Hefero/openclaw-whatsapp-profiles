@@ -21,7 +21,7 @@ import {
   saveRuntimeState
 } from './runtime-state.js';
 import { type InboundMedia, transcribeVoiceMessage } from './transcriber.js';
-import { resolveWeatherPromptContext } from './weather.js';
+import { buildWeatherLookupText, resolveWeatherPromptContext } from './weather.js';
 
 type InboundPayload = {
   type?: string;
@@ -729,10 +729,15 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     saveRuntimeState(state);
   }
   const guidance = resolveGuidance(message.remoteJid, config.policy);
+  const weatherLookupText = buildWeatherLookupText({
+    text: message.text,
+    metadata: message.raw.context?.metadata,
+    conversationContext
+  });
   const weatherStartedAt = Date.now();
   const weatherContext = guidance.profile.tools.weather
     ? await resolveWeatherPromptContext({
-        text: message.text,
+        text: weatherLookupText,
         metadata: message.raw.context?.metadata,
         weather: config.weather
       })
@@ -746,6 +751,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       inputKind: message.inputKind,
       contextMessages: conversationContext.length,
       textChars: message.text.length,
+      weatherFollowup: weatherLookupText !== message.text,
       weatherStatus: weatherContext?.status,
       weatherConfidence: weatherContext?.confidence,
       weatherLocation: weatherContext?.locationLabel
