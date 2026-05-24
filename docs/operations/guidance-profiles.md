@@ -105,7 +105,9 @@ Profiles can opt into responder tools:
   "tools": {
     "webSearch": true,
     "localRead": false,
-    "weather": true
+    "weather": true,
+    "imageGeneration": false,
+    "stickerGeneration": false
   }
 }
 ```
@@ -113,6 +115,8 @@ Profiles can opt into responder tools:
 - `webSearch`: when using `codex-proxy`, requests for that profile run Codex with live web search enabled. Keep this disabled for profiles that should never send message context to external search.
 - `localRead`: tells the responder it may inspect local files when explicitly asked. Actual access is still limited by `CODEX_PROXY_SANDBOX`, `CODEX_PROXY_WORKDIR`, and Codex config. With the default `read-only` sandbox, writes remain blocked.
 - `weather`: lets the worker resolve weather requests through structured Open-Meteo forecast/geocoding calls before the responder runs. It uses a city in the message, decimal coordinates in the message, or WhatsApp shared-location fields (`LocationLat`/`LocationLon`) when OpenClaw provides them. If no location is available, the responder is instructed to ask for a city/bairro or a WhatsApp location instead of inventing a forecast.
+- `imageGeneration`: lets the worker detect image creation requests, call the configured Image API, save the generated image under `MEDIA_OUTPUT_DIR`, and send it with `openclaw message send --media`.
+- `stickerGeneration`: lets the worker detect WhatsApp sticker/figurinha requests, generate an image, remove chroma-key or near-white backgrounds during conversion, write a 512x512 WebP sticker with FFmpeg, and send it through OpenClaw's WhatsApp `upload-file` action as a native sticker.
 
 Profiles default to tools disabled. If a profile asks for current information while the relevant tool is disabled, it should say it cannot verify from there instead of inventing a result.
 
@@ -127,6 +131,34 @@ Optional geocoding bias:
 ```text
 WEATHER_GEOCODING_COUNTRY_CODE=BR
 ```
+
+Image generation can run directly or through `codex-proxy`. In direct mode, configure:
+
+```text
+IMAGE_GENERATOR_API_KEY=your-openai-api-key
+IMAGE_GENERATOR_MODEL=gpt-image-1-mini
+IMAGE_GENERATOR_SIZE=1024x1024
+IMAGE_GENERATOR_QUALITY=low
+```
+
+When `CODEX_PROXY_ENABLED=true`, leave `IMAGE_GENERATOR_BASE_URL` unset and enable the proxy media pass-through to use the local proxy:
+
+```text
+CODEX_PROXY_MEDIA_PROVIDER=openai
+CODEX_PROXY_MEDIA_API_KEY=your-openai-api-key
+```
+
+For local testing without an image API key, use `CODEX_PROXY_MEDIA_PROVIDER=codex-cli` with `CODEX_PROXY_MEDIA_CODEX_MODEL=gpt-5.5`.
+
+Sticker generation uses the same image provider, plus FFmpeg for WebP conversion:
+
+```text
+MEDIA_FFMPEG_COMMAND=./data/whisper/ffmpeg/ffmpeg-8.1.1-essentials_build/bin/ffmpeg.exe
+STICKER_SIZE=512
+STICKER_QUALITY=65
+```
+
+The sticker prompt asks for a flat `#00ff00` chroma-key background, then conversion removes that key and also strips near-white backgrounds conservatively when the model returns a white canvas. `npm run warmup` reapplies the local OpenClaw WhatsApp sticker patch after plugin install/refresh.
 
 ## Typing Indicator
 
@@ -180,7 +212,13 @@ Voice handling is also profile-gated:
     "enabled": true,
     "transcribe": true,
     "language": "pt",
-    "maxAudioBytes": 26214400
+    "maxAudioBytes": 26214400,
+    "reply": {
+      "enabled": false,
+      "mode": "on_request",
+      "includeText": false,
+      "maxChars": 1000
+    }
   }
 }
 ```
@@ -188,6 +226,32 @@ Voice handling is also profile-gated:
 Defaults keep `voice.enabled=false`, so wildcard contacts and groups do not get audio transcribed unless their selected profile opts in. `voice.language` is optional, but setting it per profile avoids language auto-detection mistakes. Use ISO-639-1 values such as `pt`, `en`, or `es`.
 
 When enabled, the OpenClaw dispatch plugin forwards audio metadata to the worker, the worker transcribes the voice note, then the normal guidance/profile flow answers the transcript. The transcriber can be an API provider or the optional local `whisper.cpp` server behind `codex-proxy`; see [Voice notes](voice-notes.md).
+
+Audio replies are separate from transcription. Enable them with `voice.reply.enabled=true`. Use `mode="on_request"` to synthesize speech only when the user asks for audio/voz, or `mode="always"` to send every generated reply as audio. `includeText=true` sends the text with the media when the channel supports it; otherwise the worker stores the text in local conversation history and sends only the audio file.
+
+Configure TTS directly with:
+
+```text
+SPEECH_API_KEY=your-openai-api-key
+SPEECH_MODEL=gpt-4o-mini-tts
+SPEECH_VOICE=alloy
+SPEECH_RESPONSE_FORMAT=mp3
+```
+
+When `CODEX_PROXY_ENABLED=true`, leave `SPEECH_BASE_URL` unset and enable `CODEX_PROXY_MEDIA_PROVIDER` to use the same proxy path as image generation. In `codex-cli` media mode, set `SPEECH_RESPONSE_FORMAT=opus`; the proxy uses `CODEX_PROXY_LOCAL_SPEECH_ENGINE` and converts to Ogg/Opus before WhatsApp delivery.
+
+Local TTS options in `codex-cli` media mode:
+
+```text
+CODEX_PROXY_LOCAL_SPEECH_ENGINE=edge
+CODEX_PROXY_LOCAL_SPEECH_VOICE=pt-BR-FranciscaNeural
+CODEX_PROXY_LOCAL_TTS_SCRIPT=./scripts/local-tts.py
+CODEX_PROXY_LOCAL_TTS_PYTHON=python
+SPEECH_MODEL=local-tts
+SPEECH_RESPONSE_FORMAT=opus
+```
+
+Use `CODEX_PROXY_LOCAL_SPEECH_ENGINE=system` for the Windows `System.Speech` fallback. Use `CODEX_PROXY_LOCAL_SPEECH_ENGINE=piper` with local Piper voice files for fully local TTS. Install optional Python TTS dependencies with `npm run tts:install`.
 
 ## Conversation Context
 

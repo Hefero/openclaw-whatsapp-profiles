@@ -30,13 +30,21 @@ const fallbackProfile: GuidanceProfile = {
   tools: {
     webSearch: false,
     localRead: false,
-    weather: false
+    weather: false,
+    imageGeneration: false,
+    stickerGeneration: false
   },
   voice: {
     enabled: false,
     transcribe: true,
     language: undefined,
-    maxAudioBytes: 25 * 1024 * 1024
+    maxAudioBytes: 25 * 1024 * 1024,
+    reply: {
+      enabled: false,
+      mode: 'on_request',
+      includeText: false,
+      maxChars: 1000
+    }
   },
   instructions: ['Responda como assistente pessoal, sem parecer atendimento comercial.'],
   boundaries: ['Nao assuma compromissos, pagamentos ou decisoes sensiveis sem revisao humana.'],
@@ -99,8 +107,8 @@ export function buildGuidancePrompt(
     `Idioma: ${profile.language}`,
     `Tom: ${profile.tone}`,
     `Politica de identidade: ${profile.identityPolicy}`,
-    `Ferramentas permitidas: webSearch=${profile.tools.webSearch}, localRead=${profile.tools.localRead}, weather=${profile.tools.weather}`,
-    `Audio permitido: voice=${profile.voice.enabled}, transcribe=${profile.voice.transcribe}, language=${profile.voice.language ?? 'auto'}`,
+    `Ferramentas permitidas: webSearch=${profile.tools.webSearch}, localRead=${profile.tools.localRead}, weather=${profile.tools.weather}, imageGeneration=${profile.tools.imageGeneration}, stickerGeneration=${profile.tools.stickerGeneration}`,
+    `Audio permitido: voice=${profile.voice.enabled}, transcribe=${profile.voice.transcribe}, language=${profile.voice.language ?? 'auto'}, replyAudio=${profile.voice.reply.enabled ? profile.voice.reply.mode : 'off'}`,
     structuredContext.weather
       ? `Contexto meteorologico estruturado:\n${structuredContext.weather}`
       : 'Contexto meteorologico estruturado: [nenhum]',

@@ -112,6 +112,8 @@ async function main(): Promise<void> {
     console.error('openclaw whatsapp plugin install failed');
   }
 
+  run('npm', ['run', 'openclaw:patch-whatsapp-stickers'], 'patch OpenClaw WhatsApp sticker support');
+
   const dispatchPluginPath = path.resolve('openclaw-plugins', 'whatsapp-policy-dispatch');
   if (
     !run(

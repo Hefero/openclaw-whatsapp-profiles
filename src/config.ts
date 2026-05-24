@@ -25,6 +25,15 @@ const retroactiveReplyOverrideSchema = z.object({
   maxAgeHours: z.number().min(0.1).max(168).optional()
 });
 
+const voiceReplySchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    mode: z.enum(['on_request', 'always']).default('on_request'),
+    includeText: z.boolean().default(false),
+    maxChars: z.number().int().min(1).max(4000).default(1000)
+  })
+  .default({});
+
 const guidanceProfileSchema = z.object({
   label: z.string().optional(),
   language: z.string().default('pt-BR'),
@@ -41,7 +50,9 @@ const guidanceProfileSchema = z.object({
     .object({
       webSearch: z.boolean().default(false),
       localRead: z.boolean().default(false),
-      weather: z.boolean().default(false)
+      weather: z.boolean().default(false),
+      imageGeneration: z.boolean().default(false),
+      stickerGeneration: z.boolean().default(false)
     })
     .default({}),
   voice: z
@@ -49,7 +60,8 @@ const guidanceProfileSchema = z.object({
       enabled: z.boolean().default(false),
       transcribe: z.boolean().default(true),
       language: z.string().optional(),
-      maxAudioBytes: z.number().int().min(1024).max(100 * 1024 * 1024).default(25 * 1024 * 1024)
+      maxAudioBytes: z.number().int().min(1024).max(100 * 1024 * 1024).default(25 * 1024 * 1024),
+      reply: voiceReplySchema
     })
     .default({}),
   instructions: z.array(z.string()).default([]),
@@ -154,6 +166,32 @@ export type AppConfig = {
     geocodingCountryCode?: string;
     timeoutMs: number;
   };
+  media: {
+    outputDir: string;
+    ffmpegCommand?: string;
+  };
+  imageGenerator: {
+    baseUrl: string;
+    apiKey?: string;
+    model: string;
+    size: string;
+    quality: string;
+    outputFormat: 'png' | 'jpeg' | 'webp';
+    timeoutMs: number;
+  };
+  speech: {
+    baseUrl: string;
+    apiKey?: string;
+    model: string;
+    voice: string;
+    responseFormat: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
+    timeoutMs: number;
+  };
+  sticker: {
+    size: number;
+    quality: number;
+    timeoutMs: number;
+  };
   transcriber: {
     baseUrl: string;
     apiKey?: string;
@@ -165,6 +203,17 @@ export type AppConfig = {
 };
 
 const defaultPolicy: BotPolicy = policySchema.parse({});
+
+function resolveOptionalCommand(command: string | undefined): string | undefined {
+  const trimmed = command?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed.includes('/') || trimmed.includes('\\') || trimmed.startsWith('.')
+    ? path.resolve(trimmed)
+    : trimmed;
+}
 
 function readPolicy(policyPath: string): BotPolicy {
   if (!fs.existsSync(policyPath)) {
@@ -182,6 +231,12 @@ export function loadConfig(): AppConfig {
   const codexProxyEnabled = process.env.CODEX_PROXY_ENABLED === 'true';
   const codexProxyBaseUrl = `http://${codexProxyHost}:${codexProxyPort}/v1`;
   const proxyTranscriberProvider = process.env.CODEX_PROXY_TRANSCRIBER_PROVIDER;
+  const proxyMediaProvider = process.env.CODEX_PROXY_MEDIA_PROVIDER ?? 'off';
+  const openAiApiKey = process.env.OPENAI_API_KEY;
+  const directMediaApiKeyDefault = openAiApiKey ?? (codexProxyEnabled ? undefined : process.env.RESPONDER_API_KEY);
+  const useCodexProxyMedia = codexProxyEnabled && proxyMediaProvider !== 'off';
+  const mediaBaseUrlDefault = useCodexProxyMedia ? codexProxyBaseUrl : 'https://api.openai.com/v1';
+  const mediaApiKeyDefault = useCodexProxyMedia ? process.env.CODEX_PROXY_API_KEY : directMediaApiKeyDefault;
   const defaultTranscriberModel =
     proxyTranscriberProvider === 'local-whisper'
       ? process.env.WHISPER_LOCAL_MODEL ?? 'base'
@@ -216,6 +271,36 @@ export function loadConfig(): AppConfig {
       geocodingLanguage: process.env.WEATHER_GEOCODING_LANGUAGE ?? 'pt',
       geocodingCountryCode: weatherCountryCode || undefined,
       timeoutMs: Number(process.env.WEATHER_TIMEOUT_MS ?? '8000')
+    },
+    media: {
+      outputDir: path.resolve(process.env.MEDIA_OUTPUT_DIR ?? './data/generated-media'),
+      ffmpegCommand: resolveOptionalCommand(
+        process.env.MEDIA_FFMPEG_COMMAND ??
+          process.env.CODEX_PROXY_FFMPEG_COMMAND ??
+          process.env.WHISPER_LOCAL_FFMPEG_COMMAND
+      )
+    },
+    imageGenerator: {
+      baseUrl: process.env.IMAGE_GENERATOR_BASE_URL ?? mediaBaseUrlDefault,
+      apiKey: process.env.IMAGE_GENERATOR_API_KEY ?? mediaApiKeyDefault,
+      model: process.env.IMAGE_GENERATOR_MODEL ?? 'gpt-image-1-mini',
+      size: process.env.IMAGE_GENERATOR_SIZE ?? '1024x1024',
+      quality: process.env.IMAGE_GENERATOR_QUALITY ?? 'low',
+      outputFormat: z.enum(['png', 'jpeg', 'webp']).parse(process.env.IMAGE_GENERATOR_OUTPUT_FORMAT ?? 'png'),
+      timeoutMs: Number(process.env.IMAGE_GENERATOR_TIMEOUT_MS ?? '120000')
+    },
+    speech: {
+      baseUrl: process.env.SPEECH_BASE_URL ?? mediaBaseUrlDefault,
+      apiKey: process.env.SPEECH_API_KEY ?? mediaApiKeyDefault,
+      model: process.env.SPEECH_MODEL ?? 'gpt-4o-mini-tts',
+      voice: process.env.SPEECH_VOICE ?? 'alloy',
+      responseFormat: z.enum(['mp3', 'opus', 'aac', 'flac', 'wav', 'pcm']).parse(process.env.SPEECH_RESPONSE_FORMAT ?? 'mp3'),
+      timeoutMs: Number(process.env.SPEECH_TIMEOUT_MS ?? '60000')
+    },
+    sticker: {
+      size: Number(process.env.STICKER_SIZE ?? '512'),
+      quality: Number(process.env.STICKER_QUALITY ?? '65'),
+      timeoutMs: Number(process.env.STICKER_TIMEOUT_MS ?? '60000')
     },
     transcriber: {
       baseUrl:

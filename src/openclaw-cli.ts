@@ -1,4 +1,7 @@
+import crypto from 'node:crypto';
 import { existsSync } from 'node:fs';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
@@ -15,6 +18,17 @@ export type OpenClawMessage = {
 export type OpenClawSendResult = {
   messageId?: string;
   raw: unknown;
+};
+
+export type OpenClawMediaSendOptions = {
+  message?: string;
+  media: string;
+  forceDocument?: boolean;
+};
+
+export type OpenClawStickerSendOptions = {
+  media: string;
+  message?: string;
 };
 
 type RunResult = {
@@ -37,6 +51,16 @@ export function resolveOpenClawCommand(): string {
     return process.env.OPENCLAW_COMMAND;
   }
 
+  const localCommand = path.join(
+    process.cwd(),
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'openclaw.cmd' : 'openclaw'
+  );
+  if (pathExists(localCommand)) {
+    return localCommand;
+  }
+
   const appData = process.env.APPDATA;
   const localAppData = process.env.LOCALAPPDATA;
   const candidates = [
@@ -51,6 +75,43 @@ export function resolveOpenClawCommand(): string {
   }
 
   return 'openclaw';
+}
+
+function resolveOpenClawConfigPath(): string {
+  const explicitConfigPath = process.env.OPENCLAW_CONFIG_PATH?.trim();
+  if (explicitConfigPath) {
+    return path.resolve(explicitConfigPath);
+  }
+
+  const explicitHome = process.env.OPENCLAW_HOME?.trim();
+  const homeRoot = explicitHome ? path.resolve(explicitHome) : os.homedir();
+  return path.join(homeRoot, '.openclaw', 'openclaw.json');
+}
+
+async function resolveOpenClawWorkspace(): Promise<string> {
+  const fallback = path.join(os.homedir(), '.openclaw', 'workspace');
+  try {
+    const raw = await fs.readFile(resolveOpenClawConfigPath(), 'utf8');
+    const config = JSON.parse(raw) as Record<string, unknown>;
+    const agents = getObject(config.agents);
+    const defaults = getObject(agents?.defaults);
+    const workspace = getString(defaults?.workspace);
+    return workspace ? path.resolve(workspace) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function stageGatewayMedia(mediaPath: string): Promise<string> {
+  const workspace = await resolveOpenClawWorkspace();
+  const stageDir = path.join(workspace, 'whatsapp-chatbot-media');
+  await fs.mkdir(stageDir, { recursive: true });
+  const source = path.resolve(mediaPath);
+  const staged = path.join(stageDir, path.basename(source));
+  if (source.toLowerCase() !== staged.toLowerCase()) {
+    await fs.copyFile(source, staged);
+  }
+  return staged;
 }
 
 function runCommand(command: string, args: string[], env: NodeJS.ProcessEnv): RunResult {
@@ -443,6 +504,92 @@ export async function sendOpenClawMessageAsync(target: string, message: string):
 
   return {
     messageId: getString(inner?.messageId) ?? getString(obj?.messageId),
+    raw: parsed
+  };
+}
+
+export async function sendOpenClawMediaAsync(
+  target: string,
+  opts: OpenClawMediaSendOptions
+): Promise<OpenClawSendResult> {
+  const args = [
+    'message',
+    'send',
+    '--channel',
+    'whatsapp',
+    '--target',
+    target,
+    '--media',
+    opts.media,
+    '--json'
+  ];
+
+  if (opts.message?.trim()) {
+    args.push('--message', opts.message.trim());
+  }
+
+  if (opts.forceDocument) {
+    args.push('--force-document');
+  }
+
+  const result = await runOpenClawAsync(args);
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `openclaw media send failed (${result.status})`);
+  }
+
+  const parsed = extractFirstJson(result.stdout);
+  const obj = getObject(parsed);
+  const payload = getObject(obj?.payload);
+  const inner = getObject(payload?.result);
+
+  return {
+    messageId: getString(inner?.messageId) ?? getString(obj?.messageId),
+    raw: parsed
+  };
+}
+
+export async function sendOpenClawStickerAsync(
+  target: string,
+  opts: OpenClawStickerSendOptions
+): Promise<OpenClawSendResult> {
+  const media = await stageGatewayMedia(opts.media);
+  const params = {
+    channel: 'whatsapp',
+    action: 'upload-file',
+    params: {
+      to: target,
+      media,
+      contentType: 'image/webp',
+      filename: path.basename(media),
+      asSticker: true,
+      ...(opts.message?.trim() ? { message: opts.message.trim() } : {})
+    },
+    idempotencyKey: crypto.randomUUID()
+  };
+  const timeoutMs = Number(process.env.OPENCLAW_GATEWAY_CALL_TIMEOUT_MS ?? process.env.OPENCLAW_COMMAND_TIMEOUT_MS ?? '30000');
+  const result = await runOpenClawAsync([
+    'gateway',
+    'call',
+    'message.action',
+    '--params',
+    JSON.stringify(params),
+    '--timeout',
+    String(timeoutMs),
+    '--json'
+  ]);
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `openclaw sticker send failed (${result.status})`);
+  }
+
+  const parsed = extractFirstJson(result.stdout);
+  const obj = getObject(parsed);
+  const payload = getObject(obj?.payload);
+  const inner = getObject(payload?.result) ?? getObject(obj?.result);
+
+  return {
+    messageId: getString(inner?.messageId) ?? getString(payload?.messageId) ?? getString(obj?.messageId),
     raw: parsed
   };
 }

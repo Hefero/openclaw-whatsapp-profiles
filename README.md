@@ -108,6 +108,12 @@ Profiles default to showing WhatsApp's native typing indicator while an automati
 
 Profiles can opt into structured weather lookup with `tools.weather=true`. Weather requests are resolved by the worker with Open-Meteo using, in order, WhatsApp shared-location coordinates from OpenClaw metadata, decimal coordinates in the message, or a city/bairro detected in the text. If no location is available, the responder asks for one instead of using web search or guessing.
 
+Profiles can opt into image generation with `tools.imageGeneration=true`. When a configured auto-send target asks for an image, the worker calls the Image API, saves the generated file under `MEDIA_OUTPUT_DIR`, and sends it through OpenClaw with `openclaw message send --media`. In direct mode, configure `IMAGE_GENERATOR_API_KEY` or `OPENAI_API_KEY`; in Codex proxy mode, set `CODEX_PROXY_MEDIA_PROVIDER=openai` for upstream pass-through or `CODEX_PROXY_MEDIA_PROVIDER=codex-cli` for local Codex image generation.
+
+Profiles can opt into native WhatsApp sticker generation with `tools.stickerGeneration=true`. Sticker requests use the same image provider, ask for a chroma-key-friendly source image, remove chroma/near-white backgrounds during conversion, write a 512x512 WebP with alpha through FFmpeg, and send it through OpenClaw's WhatsApp `upload-file` gateway action as `asSticker=true`. `npm run warmup` reapplies the local OpenClaw WhatsApp sticker patch after plugin install/refresh; configure `MEDIA_FFMPEG_COMMAND` or reuse `CODEX_PROXY_FFMPEG_COMMAND`.
+
+Profiles can opt into audio replies with `voice.reply.enabled=true`. Use `voice.reply.mode="on_request"` to send audio only when the user asks for audio/voz, or `voice.reply.mode="always"` to deliver every generated text reply as an audio file. In direct mode, configure `SPEECH_API_KEY` or `OPENAI_API_KEY`; in Codex proxy `openai` mode, speech uses the same upstream media provider. In `codex-cli` media mode, speech can use local `System.Speech`, Edge TTS, or Piper through the repo-local TTS adapter and emit Ogg/Opus through the portable FFmpeg installed by `warmup:whisper`. If speech generation fails, the worker falls back to text.
+
 Profiles can opt into retroactive replies with `retroactiveReply.enabled=true`. The worker scans recent OpenClaw history for configured auto-reply targets and answers the latest inbound message that has no later own reply; `retroactiveReply.maxAgeHours` defaults to `12`.
 
 Profiles can also opt into WhatsApp voice-note transcription with `voice.enabled=true`. Defaults keep voice disabled. Direct API mode can transcribe with the same provider credentials; local transcription uses `codex-proxy` plus a `whisper.cpp` server:
@@ -154,6 +160,8 @@ RESPONDER_BASE_URL=http://127.0.0.1:8787/v1
 RESPONDER_API_KEY=dev-local-change-me
 RESPONDER_MODEL=gpt-5.4
 ```
+
+When `CODEX_PROXY_ENABLED=true` and `CODEX_PROXY_MEDIA_PROVIDER` is enabled, image generation and speech defaults also point at `http://127.0.0.1:8787/v1` unless `IMAGE_GENERATOR_BASE_URL` or `SPEECH_BASE_URL` is set explicitly. Use `CODEX_PROXY_MEDIA_PROVIDER=openai` for upstream pass-through or `CODEX_PROXY_MEDIA_PROVIDER=codex-cli` for local Codex image generation plus local TTS.
 
 See [Codex proxy and responder provider](docs/operations/codex-proxy.md).
 

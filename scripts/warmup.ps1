@@ -111,6 +111,11 @@ if ($LASTEXITCODE -ne 0 -or -not ($whatsappInspect | Select-String -Pattern "Sta
   Write-Host "openclaw whatsapp plugin already installed"
 }
 
+cmd /d /c npm run openclaw:patch-whatsapp-stickers
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "whatsapp sticker patch failed; native sticker sending may fail"
+}
+
 $dispatchPluginPath = Join-Path $root "openclaw-plugins\whatsapp-policy-dispatch"
 cmd /d /c "$openclawCommandForCmd plugins install `"$dispatchPluginPath`" --force"
 if ($LASTEXITCODE -ne 0) {

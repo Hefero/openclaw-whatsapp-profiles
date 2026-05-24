@@ -214,10 +214,10 @@ if (appConfig.policy.allowGroups === true) {
 }
 
 const messages = objectAt(config, 'messages');
-if (messages.visibleReplies !== 'automatic') {
-  messages.visibleReplies = 'automatic';
+if ('visibleReplies' in messages) {
+  delete messages.visibleReplies;
   changed = true;
-  console.log('Set messages.visibleReplies=automatic');
+  console.log('Removed invalid messages.visibleReplies');
 }
 
 const plugins = objectAt(config, 'plugins');

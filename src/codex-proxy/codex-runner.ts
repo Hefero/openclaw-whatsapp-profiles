@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,6 +19,22 @@ export type CodexRunResult = {
   stderr: string;
   durationMs: number;
 };
+
+function terminateProcessTree(child: ChildProcess): void {
+  if (!child.pid) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true
+    });
+    return;
+  }
+
+  child.kill('SIGTERM');
+}
 
 export async function runCodex(prompt: string, config: CodexRunnerConfig): Promise<CodexRunResult> {
   if (prompt.length > config.maxPromptChars) {
@@ -59,8 +75,10 @@ export async function runCodex(prompt: string, config: CodexRunnerConfig): Promi
       windowsHide: true
     });
 
+    let timedOut = false;
     const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
+      timedOut = true;
+      terminateProcessTree(child);
     }, config.timeoutMs);
 
     child.stdout.setEncoding('utf8');
@@ -81,6 +99,10 @@ export async function runCodex(prompt: string, config: CodexRunnerConfig): Promi
     });
 
     clearTimeout(timeout);
+
+    if (timedOut) {
+      throw new Error(`codex timed out after ${config.timeoutMs}ms`);
+    }
 
     if (exitCode !== 0) {
       const detail = stderr.trim() || stdout.trim() || `codex exited with status ${exitCode}`;

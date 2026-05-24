@@ -4,6 +4,7 @@ dist/
 .env.*
 !.env.example
 .tmp-npm-cache/
+output/
 out.txt
 *.log
 

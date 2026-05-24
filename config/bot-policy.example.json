@@ -19,13 +19,21 @@
       "tools": {
         "webSearch": false,
         "localRead": false,
-        "weather": false
+        "weather": false,
+        "imageGeneration": false,
+        "stickerGeneration": false
       },
       "voice": {
         "enabled": false,
         "transcribe": true,
         "language": "pt",
-        "maxAudioBytes": 26214400
+        "maxAudioBytes": 26214400,
+        "reply": {
+          "enabled": false,
+          "mode": "on_request",
+          "includeText": false,
+          "maxChars": 1000
+        }
       },
       "instructions": [
         "Responda como assistente pessoal, sem parecer atendimento comercial.",
@@ -48,13 +56,21 @@
       "tools": {
         "webSearch": false,
         "localRead": false,
-        "weather": true
+        "weather": true,
+        "imageGeneration": false,
+        "stickerGeneration": false
       },
       "voice": {
         "enabled": false,
         "transcribe": true,
         "language": "pt",
-        "maxAudioBytes": 26214400
+        "maxAudioBytes": 26214400,
+        "reply": {
+          "enabled": false,
+          "mode": "on_request",
+          "includeText": false,
+          "maxChars": 1000
+        }
       },
       "instructions": [
         "Pode usar abreviacoes naturais.",
@@ -78,13 +94,21 @@
       "tools": {
         "webSearch": true,
         "localRead": false,
-        "weather": true
+        "weather": true,
+        "imageGeneration": false,
+        "stickerGeneration": false
       },
       "voice": {
         "enabled": false,
         "transcribe": true,
         "language": "pt",
-        "maxAudioBytes": 26214400
+        "maxAudioBytes": 26214400,
+        "reply": {
+          "enabled": false,
+          "mode": "on_request",
+          "includeText": false,
+          "maxChars": 1000
+        }
       },
       "instructions": [
         "Responda com clareza operacional.",

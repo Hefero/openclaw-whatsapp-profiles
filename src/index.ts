@@ -6,6 +6,17 @@ import { pino } from 'pino';
 import { loadConfig, type AppConfig, type TargetConfig } from './config.js';
 import { decideDelivery } from './delivery-gate.js';
 import { resolveConversationContext, resolveGuidance } from './guidance.js';
+import {
+  convertImageToStickerFile,
+  generateImageFile,
+  imagePromptFromMessage,
+  isAudioReplyRequested,
+  isLikelyImageGenerationRequest,
+  isLikelyStickerGenerationRequest,
+  stickerPromptFromMessage,
+  synthesizeSpeechFile
+} from './media-tools.js';
+import { sendOpenClawMediaAsync, sendOpenClawStickerAsync, toOpenClawTarget } from './openclaw-cli.js';
 import { decideMessageAction } from './policy.js';
 import { generateDraftReply } from './responder.js';
 import { hasRetroactiveReplyTargets, runRetroactiveReplyScan } from './retroactive-replies.js';
@@ -557,6 +568,38 @@ function replyFromResult(result: unknown): string | undefined {
   return action === 'reply' && typeof reply === 'string' && reply.length > 0 ? reply : undefined;
 }
 
+function canSendOpenClawMedia(payload: InboundPayload): boolean {
+  return payload.sessionKey !== 'twilio' && payload.context?.channelId === 'whatsapp';
+}
+
+function openClawTargetForMessage(message: InboundMessage, target: TargetConfig | undefined): string {
+  return toOpenClawTarget(target?.id ?? message.remoteJid, target?.openclawTarget);
+}
+
+function userVisibleMediaFailure(
+  reason: string,
+  identityPolicy: 'masked' | 'open',
+  kind: 'audio' | 'image' | 'sticker'
+): string {
+  if (identityPolicy === 'open') {
+    if (kind === 'image') {
+      return `Nao consegui gerar/enviar a imagem agora (${reason}).`;
+    }
+    if (kind === 'sticker') {
+      return `Nao consegui gerar/enviar a figurinha agora (${reason}).`;
+    }
+    return `Nao consegui enviar em audio agora (${reason}). Vou mandar em texto.`;
+  }
+
+  if (kind === 'image') {
+    return 'Nao consegui gerar a imagem agora.';
+  }
+  if (kind === 'sticker') {
+    return 'Nao consegui gerar a figurinha agora.';
+  }
+  return 'Nao consegui mandar em audio agora. Vai por texto mesmo.';
+}
+
 function resolveTypingPolicyForInbound(payload: InboundPayload): TypingPolicyResult {
   const config = loadConfig();
 
@@ -729,6 +772,13 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     saveRuntimeState(state);
   }
   const guidance = resolveGuidance(message.remoteJid, config.policy);
+  const rememberAutoReply = (text: string): void => {
+    rememberOutbound(state, message.remoteJid, text);
+    if (target && contextSettings.enabled) {
+      rememberConversationEntry(state, message.remoteJid, 'outbound', text);
+    }
+    saveRuntimeState(state);
+  };
   const weatherLookupText = buildWeatherLookupText({
     text: message.text,
     metadata: message.raw.context?.metadata,
@@ -758,6 +808,346 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     },
     'openclaw inbound message normalized'
   );
+
+  const stickerRequest = isLikelyStickerGenerationRequest(message.text);
+  if (stickerRequest) {
+    const stickerReply = guidance.profile.tools.stickerGeneration
+      ? 'Pedido de figurinha detectado. Em modo auto, vou gerar e enviar a figurinha.'
+      : guidance.profile.identityPolicy === 'open'
+        ? 'Geracao de figurinha nao esta habilitada neste perfil.'
+        : 'Nao consigo gerar figurinha daqui agora.';
+
+    if (decision.action === 'draft') {
+      logger.info(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reply: logReplyContent ? stickerReply : undefined,
+          replyChars: stickerReply.length
+        },
+        'draft sticker request ready'
+      );
+      return { ok: true, action: 'draft', reply: stickerReply };
+    }
+
+    const delivery = decideDelivery(config.policy, target);
+    if (!delivery.allowed) {
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reasons: delivery.reasons,
+          reply: logReplyContent ? stickerReply : undefined,
+          replyChars: stickerReply.length
+        },
+        'sticker auto reply blocked by delivery gate'
+      );
+      return { ok: true, action: 'blocked', reasons: delivery.reasons, reply: stickerReply };
+    }
+
+    const hourlyLimit = target?.autoReply.maxRepliesPerHour ?? config.policy.maxAutoRepliesPerHour;
+    const recentAutoReplies = countRecentOutbound(state, message.remoteJid, 60 * 60 * 1000);
+    if (recentAutoReplies >= hourlyLimit) {
+      const reasons = [`max auto replies per hour reached (${hourlyLimit})`];
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reasons,
+          reply: logReplyContent ? stickerReply : undefined,
+          replyChars: stickerReply.length
+        },
+        'sticker auto reply blocked by rate limit'
+      );
+      return { ok: true, action: 'blocked', reasons, reply: stickerReply };
+    }
+
+    if (!guidance.profile.tools.stickerGeneration) {
+      rememberAutoReply(stickerReply);
+      return { ok: true, action: 'reply', reply: stickerReply };
+    }
+
+    if (!canSendOpenClawMedia(payload)) {
+      const reply = 'Consigo entender o pedido de figurinha, mas este caminho de entrega ainda nao envia midia.';
+      rememberAutoReply(reply);
+      return { ok: true, action: 'reply', reply };
+    }
+
+    const mediaStartedAt = Date.now();
+    logger.info(
+      {
+        target: targetLabel,
+        messageId: message.id,
+        imageModel: config.imageGenerator.model,
+        imageTimeoutMs: config.imageGenerator.timeoutMs,
+        stickerSize: config.sticker.size
+      },
+      'sticker generation started'
+    );
+    const generated = await generateImageFile({
+      prompt: stickerPromptFromMessage(message.text),
+      config: config.imageGenerator,
+      outputDir: config.media.outputDir
+    });
+
+    if (!generated.ok) {
+      const mediaFinishedAt = Date.now();
+      logger.info(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          inputKind: message.inputKind,
+          resolveMessageMs: normalizedAt - decisionAt,
+          weatherMs: weatherFinishedAt - weatherStartedAt,
+          mediaMs: mediaFinishedAt - mediaStartedAt,
+          totalMs: mediaFinishedAt - handlerStartedAt
+        },
+        'openclaw inbound timings'
+      );
+
+      const reply = userVisibleMediaFailure(generated.reason, guidance.profile.identityPolicy, 'sticker');
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reason: generated.reason,
+          reply: logReplyContent ? reply : undefined,
+          replyChars: reply.length
+        },
+        'sticker image generation failed'
+      );
+      rememberAutoReply(reply);
+      return { ok: true, action: 'reply', reply };
+    }
+
+    logger.info(
+      {
+        target: targetLabel,
+        messageId: message.id,
+        imagePath: generated.media.path
+      },
+      'sticker source image generated'
+    );
+
+    const sticker = await convertImageToStickerFile({
+      imagePath: generated.media.path,
+      outputDir: config.media.outputDir,
+      ffmpegCommand: config.media.ffmpegCommand,
+      size: config.sticker.size,
+      quality: config.sticker.quality,
+      timeoutMs: config.sticker.timeoutMs
+    });
+    const mediaFinishedAt = Date.now();
+
+    logger.info(
+      {
+        target: targetLabel,
+        messageId: message.id,
+        inputKind: message.inputKind,
+        resolveMessageMs: normalizedAt - decisionAt,
+        weatherMs: weatherFinishedAt - weatherStartedAt,
+        mediaMs: mediaFinishedAt - mediaStartedAt,
+        totalMs: mediaFinishedAt - handlerStartedAt
+      },
+      'openclaw inbound timings'
+    );
+
+    if (!sticker.ok) {
+      const reply = userVisibleMediaFailure(sticker.reason, guidance.profile.identityPolicy, 'sticker');
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reason: sticker.reason,
+          imagePath: generated.media.path,
+          reply: logReplyContent ? reply : undefined,
+          replyChars: reply.length
+        },
+        'sticker conversion failed'
+      );
+      rememberAutoReply(reply);
+      return { ok: true, action: 'reply', reply };
+    }
+
+    logger.info(
+      {
+        target: targetLabel,
+        messageId: message.id,
+        mediaPath: sticker.media.path
+      },
+      'sticker conversion finished'
+    );
+
+    try {
+      await sendOpenClawStickerAsync(openClawTargetForMessage(message, target), {
+        media: sticker.media.path
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const reply = userVisibleMediaFailure(reason, guidance.profile.identityPolicy, 'sticker');
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reason,
+          reply: logReplyContent ? reply : undefined,
+          replyChars: reply.length
+        },
+        'sticker media send failed'
+      );
+      rememberAutoReply(reply);
+      return { ok: true, action: 'reply', reply };
+    }
+
+    const memoryText = `[figurinha enviada] ${message.text}`;
+    rememberAutoReply(memoryText);
+    logger.info(
+      {
+        target: targetLabel,
+        messageId: message.id,
+        sourceImagePath: generated.media.path,
+        mediaPath: sticker.media.path
+      },
+      'sticker media reply sent'
+    );
+    return { ok: true, action: 'sent_media', media: 'sticker' };
+  }
+
+  const imageRequest = isLikelyImageGenerationRequest(message.text);
+  if (imageRequest) {
+    const imageReply = guidance.profile.tools.imageGeneration
+      ? 'Pedido de imagem detectado. Em modo auto, vou gerar e enviar a imagem.'
+      : guidance.profile.identityPolicy === 'open'
+        ? 'Geracao de imagem nao esta habilitada neste perfil.'
+        : 'Nao consigo gerar imagem daqui agora.';
+
+    if (decision.action === 'draft') {
+      logger.info(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reply: logReplyContent ? imageReply : undefined,
+          replyChars: imageReply.length
+        },
+        'draft image request ready'
+      );
+      return { ok: true, action: 'draft', reply: imageReply };
+    }
+
+    const delivery = decideDelivery(config.policy, target);
+    if (!delivery.allowed) {
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reasons: delivery.reasons,
+          reply: logReplyContent ? imageReply : undefined,
+          replyChars: imageReply.length
+        },
+        'image auto reply blocked by delivery gate'
+      );
+      return { ok: true, action: 'blocked', reasons: delivery.reasons, reply: imageReply };
+    }
+
+    const hourlyLimit = target?.autoReply.maxRepliesPerHour ?? config.policy.maxAutoRepliesPerHour;
+    const recentAutoReplies = countRecentOutbound(state, message.remoteJid, 60 * 60 * 1000);
+    if (recentAutoReplies >= hourlyLimit) {
+      const reasons = [`max auto replies per hour reached (${hourlyLimit})`];
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reasons,
+          reply: logReplyContent ? imageReply : undefined,
+          replyChars: imageReply.length
+        },
+        'image auto reply blocked by rate limit'
+      );
+      return { ok: true, action: 'blocked', reasons, reply: imageReply };
+    }
+
+    if (!guidance.profile.tools.imageGeneration) {
+      rememberAutoReply(imageReply);
+      return { ok: true, action: 'reply', reply: imageReply };
+    }
+
+    if (!canSendOpenClawMedia(payload)) {
+      const reply = 'Consigo entender o pedido de imagem, mas este caminho de entrega ainda nao envia midia.';
+      rememberAutoReply(reply);
+      return { ok: true, action: 'reply', reply };
+    }
+
+    const mediaStartedAt = Date.now();
+    const generated = await generateImageFile({
+      prompt: imagePromptFromMessage(message.text),
+      config: config.imageGenerator,
+      outputDir: config.media.outputDir
+    });
+    const mediaFinishedAt = Date.now();
+
+    logger.info(
+      {
+        target: targetLabel,
+        messageId: message.id,
+        inputKind: message.inputKind,
+        resolveMessageMs: normalizedAt - decisionAt,
+        weatherMs: weatherFinishedAt - weatherStartedAt,
+        mediaMs: mediaFinishedAt - mediaStartedAt,
+        totalMs: mediaFinishedAt - handlerStartedAt
+      },
+      'openclaw inbound timings'
+    );
+
+    if (!generated.ok) {
+      const reply = userVisibleMediaFailure(generated.reason, guidance.profile.identityPolicy, 'image');
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reason: generated.reason,
+          reply: logReplyContent ? reply : undefined,
+          replyChars: reply.length
+        },
+        'image generation failed'
+      );
+      rememberAutoReply(reply);
+      return { ok: true, action: 'reply', reply };
+    }
+
+    try {
+      await sendOpenClawMediaAsync(openClawTargetForMessage(message, target), {
+        media: generated.media.path,
+        message: 'Imagem gerada.'
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const reply = userVisibleMediaFailure(reason, guidance.profile.identityPolicy, 'image');
+      logger.warn(
+        {
+          target: targetLabel,
+          messageId: message.id,
+          reason,
+          reply: logReplyContent ? reply : undefined,
+          replyChars: reply.length
+        },
+        'image media send failed'
+      );
+      rememberAutoReply(reply);
+      return { ok: true, action: 'reply', reply };
+    }
+
+    const memoryText = `[imagem enviada] ${message.text}`;
+    rememberAutoReply(memoryText);
+    logger.info(
+      {
+        target: targetLabel,
+        messageId: message.id,
+        mediaPath: generated.media.path
+      },
+      'image media reply sent'
+    );
+    return { ok: true, action: 'sent_media', media: 'image' };
+  }
 
   const responderStartedAt = Date.now();
   const reply = await generateDraftReply({
@@ -831,22 +1221,80 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     return { ok: true, action: 'blocked', reasons, reply };
   }
 
+  const audioRequested = isAudioReplyRequested(message.text);
+  const shouldReplyWithAudio =
+    guidance.profile.voice.reply.enabled &&
+    (guidance.profile.voice.reply.mode === 'always' ||
+      (guidance.profile.voice.reply.mode === 'on_request' && audioRequested));
+  let textReply = reply;
+
+  if (shouldReplyWithAudio && canSendOpenClawMedia(payload)) {
+    const speech = await synthesizeSpeechFile({
+      text: reply.slice(0, guidance.profile.voice.reply.maxChars),
+      config: config.speech,
+      outputDir: config.media.outputDir
+    });
+
+    if (speech.ok) {
+      try {
+        await sendOpenClawMediaAsync(openClawTargetForMessage(message, target), {
+          media: speech.media.path,
+          message: guidance.profile.voice.reply.includeText ? reply : undefined
+        });
+        rememberAutoReply(reply);
+        logger.info(
+          {
+            target: targetLabel,
+            messageId: message.id,
+            responderModel: config.responder.model,
+            mediaPath: speech.media.path,
+            includeText: guidance.profile.voice.reply.includeText,
+            reply: logReplyContent ? reply : undefined,
+            replyChars: reply.length
+          },
+          'audio media reply sent'
+        );
+        return {
+          ok: true,
+          action: 'sent_media',
+          media: 'audio',
+          reply: guidance.profile.voice.reply.includeText ? reply : undefined
+        };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        logger.warn(
+          { target: targetLabel, messageId: message.id, reason },
+          'audio media send failed, falling back to text'
+        );
+        if (audioRequested) {
+          textReply = `${userVisibleMediaFailure(reason, guidance.profile.identityPolicy, 'audio')}\n\n${reply}`;
+        }
+      }
+    } else {
+      logger.warn(
+        { target: targetLabel, messageId: message.id, reason: speech.reason },
+        'speech generation failed, falling back to text'
+      );
+      if (audioRequested) {
+        textReply = `${userVisibleMediaFailure(speech.reason, guidance.profile.identityPolicy, 'audio')}\n\n${reply}`;
+      }
+    }
+  } else if (shouldReplyWithAudio && audioRequested) {
+    textReply = `${userVisibleMediaFailure('media delivery unavailable', guidance.profile.identityPolicy, 'audio')}\n\n${reply}`;
+  }
+
   logger.info(
     {
       target: targetLabel,
       messageId: message.id,
       responderModel: config.responder.model,
-      reply: logReplyContent ? reply : undefined,
-      replyChars: reply.length
+      reply: logReplyContent ? textReply : undefined,
+      replyChars: textReply.length
     },
     'auto reply approved'
   );
-  rememberOutbound(state, message.remoteJid, reply);
-  if (target && contextSettings.enabled) {
-    rememberConversationEntry(state, message.remoteJid, 'outbound', reply);
-  }
-  saveRuntimeState(state);
-  return { ok: true, action: 'reply', reply };
+  rememberAutoReply(textReply);
+  return { ok: true, action: 'reply', reply: textReply };
 }
 
 const server = http.createServer(async (request, response) => {
@@ -866,6 +1314,8 @@ const server = http.createServer(async (request, response) => {
           responderBaseUrl: config.responder.baseUrl,
           weatherEnabled: config.weather.enabled,
           weatherProvider: config.weather.provider,
+          imageGeneratorConfigured: Boolean(config.imageGenerator.apiKey),
+          speechConfigured: Boolean(config.speech.apiKey),
           transcriberModel: config.transcriber.model,
           transcriberConfigured: Boolean(config.transcriber.apiKey)
         });
