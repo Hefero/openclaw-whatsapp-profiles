@@ -793,6 +793,8 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       })
     : undefined;
   const weatherFinishedAt = Date.now();
+  const stickerRequest = isLikelyStickerGenerationRequest(message.text);
+  const imageRequest = isLikelyImageGenerationRequest(message.text);
 
   logger.info(
     {
@@ -801,6 +803,8 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       inputKind: message.inputKind,
       contextMessages: conversationContext.length,
       textChars: message.text.length,
+      stickerRequest,
+      imageRequest,
       weatherFollowup: weatherLookupText !== message.text,
       weatherStatus: weatherContext?.status,
       weatherConfidence: weatherContext?.confidence,
@@ -809,7 +813,6 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     'openclaw inbound message normalized'
   );
 
-  const stickerRequest = isLikelyStickerGenerationRequest(message.text);
   if (stickerRequest) {
     const stickerReply = guidance.profile.tools.stickerGeneration
       ? 'Pedido de figurinha detectado. Em modo auto, vou gerar e enviar a figurinha.'
@@ -1013,7 +1016,6 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     return { ok: true, action: 'sent_media', media: 'sticker' };
   }
 
-  const imageRequest = isLikelyImageGenerationRequest(message.text);
   if (imageRequest) {
     const imageReply = guidance.profile.tools.imageGeneration
       ? 'Pedido de imagem detectado. Em modo auto, vou gerar e enviar a imagem.'

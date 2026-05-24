@@ -178,12 +178,13 @@ Required pieces:
 
 ```text
 MEDIA_FFMPEG_COMMAND=./data/whisper/ffmpeg/ffmpeg-8.1.1-essentials_build/bin/ffmpeg.exe
+MEDIA_STICKER_PYTHON=python
 STICKER_SIZE=512
 STICKER_QUALITY=65
 STICKER_TIMEOUT_MS=60000
 ```
 
-`npm run warmup` reapplies the local OpenClaw WhatsApp plugin patch that adds `asSticker=true` support to the `upload-file` gateway action. Sticker files are staged into OpenClaw's configured workspace before the gateway call so local media access rules allow the upload.
+Run `npm run media:install` once for the Pillow dependency used to clean transparent pixels and write exact-alpha sticker WebP files. `npm run warmup` reapplies the local OpenClaw WhatsApp plugin patch that adds `asSticker=true` support to the `upload-file` gateway action. Sticker files are staged into OpenClaw's configured workspace before the gateway call so local media access rules allow the upload.
 
 ## Guardrails
 

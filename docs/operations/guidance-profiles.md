@@ -150,15 +150,16 @@ CODEX_PROXY_MEDIA_API_KEY=your-openai-api-key
 
 For local testing without an image API key, use `CODEX_PROXY_MEDIA_PROVIDER=codex-cli` with `CODEX_PROXY_MEDIA_CODEX_MODEL=gpt-5.5`.
 
-Sticker generation uses the same image provider, plus FFmpeg for WebP conversion:
+Sticker generation uses the same image provider, plus FFmpeg and Pillow for WebP conversion:
 
 ```text
 MEDIA_FFMPEG_COMMAND=./data/whisper/ffmpeg/ffmpeg-8.1.1-essentials_build/bin/ffmpeg.exe
+MEDIA_STICKER_PYTHON=python
 STICKER_SIZE=512
 STICKER_QUALITY=65
 ```
 
-The sticker prompt asks for a flat `#00ff00` chroma-key background, then conversion removes that key and also strips near-white backgrounds conservatively when the model returns a white canvas. `npm run warmup` reapplies the local OpenClaw WhatsApp sticker patch after plugin install/refresh.
+The sticker prompt asks for a flat `#00ff00` chroma-key background. Conversion removes that key with FFmpeg, then uses Pillow to zero low-alpha pixels and save a lossless exact-alpha WebP so WhatsApp clients do not show chroma-key color in transparent areas. Run `npm run media:install` for the Pillow dependency. `npm run warmup` reapplies the local OpenClaw WhatsApp sticker patch after plugin install/refresh.
 
 ## Typing Indicator
 

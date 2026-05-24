@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AppConfig } from './config.js';
 
 type ImageGenerationResponse = {
@@ -10,6 +11,8 @@ type ImageGenerationResponse = {
     url?: string;
   }>;
 };
+
+const STICKER_PREPARE_SCRIPT = fileURLToPath(new URL('../scripts/prepare-sticker-webp.py', import.meta.url));
 
 export type GeneratedMedia = {
   path: string;
@@ -49,7 +52,10 @@ export function isLikelyStickerGenerationRequest(text: string): boolean {
 
   return [
     /\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|manda|mande|envia|envie|transforma|transforme)\b.*\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b/u,
-    /\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b.*\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|manda|mande|envia|envie|transforma|transforme)\b/u
+    /\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b.*\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|manda|mande|envia|envie|transforma|transforme)\b/u,
+    /\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b\s+(?:de|do|da|dos|das|com|em|no|na|num|numa|estilo|tipo|formato|pronta|pronto|pra|para|fundo|transparente)\b/u,
+    /\b(?:fundo transparente|sem fundo|chroma key|chroma)\b.*\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b/u,
+    /\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b.*\b(?:fundo transparente|sem fundo|chroma key|chroma|pronta pra|pronto pra|pronta para|pronto para)\b/u
   ].some((pattern) => pattern.test(normalized));
 }
 
@@ -183,6 +189,14 @@ function runFileWithTimeout(
   });
 }
 
+function stickerPythonCommand(): string {
+  return (
+    process.env.MEDIA_STICKER_PYTHON?.trim() ||
+    process.env.CODEX_PROXY_LOCAL_TTS_PYTHON?.trim() ||
+    'python'
+  );
+}
+
 export async function generateImageFile(input: {
   prompt: string;
   config: AppConfig['imageGenerator'];
@@ -259,15 +273,15 @@ export async function convertImageToStickerFile(input: {
     const size = Math.max(64, Math.min(1024, Math.round(input.size)));
     const quality = Math.max(1, Math.min(100, Math.round(input.quality)));
     const outputPath = mediaPath(input.outputDir, 'sticker', 'webp');
+    const intermediatePath = mediaPath(input.outputDir, 'sticker-intermediate', 'png');
     const filter = [
       'format=rgba',
       'colorkey=0x00ff00:0.30:0.06',
-      'colorkey=0xffffff:0.11:0.04',
       `scale=${size}:${size}:force_original_aspect_ratio=decrease`,
       `pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=black@0`,
       'format=rgba'
     ].join(',');
-    const result = await runFileWithTimeout(
+    const ffmpegResult = await runFileWithTimeout(
       input.ffmpegCommand,
       [
         '-hide_banner',
@@ -278,24 +292,46 @@ export async function convertImageToStickerFile(input: {
         input.imagePath,
         '-vf',
         filter,
-        '-an',
-        '-c:v',
-        'libwebp',
-        '-lossless',
-        '0',
-        '-q:v',
-        String(quality),
-        '-compression_level',
-        '6',
-        '-preset',
-        'picture',
-        outputPath
+        '-frames:v',
+        '1',
+        intermediatePath
       ],
       input.timeoutMs
     );
 
-    if (result.status !== 0) {
-      return { ok: false, reason: result.stderr || result.stdout || `ffmpeg exited with status ${result.status}` };
+    if (ffmpegResult.status !== 0) {
+      return {
+        ok: false,
+        reason: ffmpegResult.stderr || ffmpegResult.stdout || `ffmpeg exited with status ${ffmpegResult.status}`
+      };
+    }
+
+    const prepareResult = await runFileWithTimeout(
+      stickerPythonCommand(),
+      [
+        STICKER_PREPARE_SCRIPT,
+        intermediatePath,
+        outputPath,
+        '--alpha-threshold',
+        '15',
+        '--quality',
+        String(quality),
+        '--method',
+        '6'
+      ],
+      input.timeoutMs
+    );
+
+    await fs.rm(intermediatePath, { force: true }).catch(() => undefined);
+
+    if (prepareResult.status !== 0) {
+      return {
+        ok: false,
+        reason:
+          prepareResult.stderr ||
+          prepareResult.stdout ||
+          `sticker WebP preparation exited with status ${prepareResult.status}`
+      };
     }
 
     return { ok: true, media: { path: outputPath } };
