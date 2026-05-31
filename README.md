@@ -8,6 +8,7 @@ The main flow is OpenClaw-only. Twilio support is included as an experimental we
 
 - Per-contact and per-group profiles with `observe`, `draft`, or gated `auto` replies.
 - WhatsApp voice-note transcription with direct API transcription or local `whisper.cpp`.
+- Inbound image understanding/OCR, profile-gated with `tools.imageUnderstanding=true`.
 - Structured weather lookup through Open-Meteo using WhatsApp shared locations, coordinates, or city/bairro text.
 - Image generation, profile-gated with `tools.imageGeneration=true`, delivered as WhatsApp media.
 - Native WhatsApp sticker generation, profile-gated with `tools.stickerGeneration=true`, delivered through OpenClaw as `asSticker=true`.
@@ -59,7 +60,7 @@ npm run tts:install
 npm run warmup:whisper
 ```
 
-Then opt profiles into the capabilities you want in `config/bot-policy.local.json`, for example `tools.imageGeneration=true`, `tools.stickerGeneration=true`, `voice.enabled=true`, or `voice.reply.enabled=true`. See [Guidance profiles](docs/operations/guidance-profiles.md) and [Codex proxy](docs/operations/codex-proxy.md) for the provider-specific environment variables.
+Then opt profiles into the capabilities you want in `config/bot-policy.local.json`, for example `tools.imageUnderstanding=true`, `tools.imageGeneration=true`, `tools.stickerGeneration=true`, `voice.enabled=true`, or `voice.reply.enabled=true`. See [Guidance profiles](docs/operations/guidance-profiles.md) and [Codex proxy](docs/operations/codex-proxy.md) for the provider-specific environment variables.
 
 Then start:
 
@@ -127,6 +128,8 @@ The example policy opens inbound visibility with `allowContacts=["*"]` and `allo
 Profiles default to showing WhatsApp's native typing indicator while an automatic reply is being generated. Disable it per profile with `typing.enabled=false`, or tune the refresh interval with `typing.intervalMs`.
 
 Profiles can opt into structured weather lookup with `tools.weather=true`. Weather requests are resolved by the worker with Open-Meteo using, in order, WhatsApp shared-location coordinates from OpenClaw metadata, decimal coordinates in the message, or a city/bairro detected in the text. If no location is available, the responder asks for one instead of using web search or guessing.
+
+Profiles can opt into inbound image understanding with `tools.imageUnderstanding=true`. When WhatsApp sends an image with a local `mediaPath`, the worker extracts OCR/visual context before the responder runs. Direct API mode uses `IMAGE_UNDERSTANDING_*`; in local testing, `IMAGE_UNDERSTANDING_PROVIDER=codex-cli` lets Codex read the local image path. If image understanding fails, the worker falls back to a short text explanation instead of silently ignoring the image.
 
 Profiles can opt into image generation with `tools.imageGeneration=true`. When a configured auto-send target asks for an image, the worker calls the Image API, saves the generated file under `MEDIA_OUTPUT_DIR`, and sends it through OpenClaw with `openclaw message send --media`. In direct mode, configure `IMAGE_GENERATOR_API_KEY` or `OPENAI_API_KEY`; in Codex proxy mode, set `CODEX_PROXY_MEDIA_PROVIDER=openai` for upstream pass-through or `CODEX_PROXY_MEDIA_PROVIDER=codex-cli` for local Codex image generation.
 

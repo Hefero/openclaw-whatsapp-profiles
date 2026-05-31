@@ -7,6 +7,12 @@ import { loadConfig, type AppConfig, type TargetConfig } from './config.js';
 import { decideDelivery } from './delivery-gate.js';
 import { resolveConversationContext, resolveGuidance } from './guidance.js';
 import {
+  buildImageUnderstandingMessage,
+  fallbackImageUnderstandingMessage,
+  isLikelyImageMedia,
+  understandImageMessage
+} from './image-understanding.js';
+import {
   convertImageToStickerFile,
   generateImageFile,
   imagePromptFromMessage,
@@ -255,10 +261,26 @@ function isAudioPlaceholder(text: string | undefined): boolean {
 
 function collectInboundMedia(payload: InboundPayload): InboundMedia | undefined {
   const metadata = payload.context?.metadata ?? {};
-  const mediaPath = firstString(metadata.mediaPath, metadata.MediaPath, metadata.mediaPaths, metadata.MediaPaths);
-  const mediaUrl = firstString(metadata.mediaUrl, metadata.MediaUrl, metadata.mediaUrls, metadata.MediaUrls);
-  const mediaType = firstString(metadata.mediaType, metadata.MediaType, metadata.mediaTypes, metadata.MediaTypes);
-  const mediaFileName = firstString(metadata.mediaFileName, metadata.MediaFileName, metadata.fileName);
+  const mediaPath = firstString(
+    metadata.mediaPath,
+    metadata.MediaPath,
+    metadata.mediaPaths,
+    metadata.MediaPaths,
+    metadata.filePath,
+    metadata.FilePath,
+    metadata.path
+  );
+  const mediaUrl = firstString(metadata.mediaUrl, metadata.MediaUrl, metadata.mediaUrls, metadata.MediaUrls, metadata.fileUrl);
+  const mediaType = firstString(
+    metadata.mediaType,
+    metadata.MediaType,
+    metadata.mediaTypes,
+    metadata.MediaTypes,
+    metadata.mimeType,
+    metadata.mimetype,
+    metadata.contentType
+  );
+  const mediaFileName = firstString(metadata.mediaFileName, metadata.MediaFileName, metadata.fileName, metadata.filename);
 
   if (!mediaPath && !mediaUrl && !mediaType && !mediaFileName) {
     return undefined;
@@ -344,6 +366,10 @@ function seedCanProduceReply(seed: InboundSeed, config: AppConfig): { ok: true }
   }
 
   if (!isAudioSeed(seed)) {
+    const guidance = resolveGuidance(seed.remoteJid, config.policy);
+    if (isLikelyImageMedia(seed.media) && guidance.profile.tools.imageUnderstanding) {
+      return { ok: true };
+    }
     return { ok: false, reason: 'non-audio media message' };
   }
 
@@ -359,6 +385,8 @@ async function resolveMessageFromSeed(
   seed: InboundSeed,
   config: AppConfig
 ): Promise<InboundMessage | { ignored: true; reason: string }> {
+  const guidance = resolveGuidance(seed.remoteJid, config.policy);
+
   if (seed.transcript) {
     return {
       id: seed.id,
@@ -368,6 +396,35 @@ async function resolveMessageFromSeed(
       raw: seed.raw,
       media: seed.media
     };
+  }
+
+  if (isLikelyImageMedia(seed.media)) {
+    if (guidance.profile.tools.imageUnderstanding) {
+      const result = await understandImageMessage({
+        media: seed.media ?? {},
+        caption: seed.text,
+        profile: guidance.profile,
+        config: config.imageUnderstanding
+      });
+
+      return {
+        id: seed.id,
+        remoteJid: seed.remoteJid,
+        text: result.ok
+          ? buildImageUnderstandingMessage({
+              caption: seed.text,
+              imageContext: result.text
+            })
+          : fallbackImageUnderstandingMessage(result.reason, seed.text),
+        inputKind: 'media',
+        raw: seed.raw,
+        media: seed.media
+      };
+    }
+
+    if (!seedHasText(seed)) {
+      return { ignored: true, reason: 'image understanding disabled for profile' };
+    }
   }
 
   if (seedHasText(seed)) {
@@ -389,7 +446,6 @@ async function resolveMessageFromSeed(
     return { ignored: true, reason: 'non-audio media message' };
   }
 
-  const guidance = resolveGuidance(seed.remoteJid, config.policy);
   if (!guidance.profile.voice.enabled || !guidance.profile.voice.transcribe) {
     return { ignored: true, reason: 'voice disabled for profile' };
   }
@@ -805,6 +861,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       textChars: message.text.length,
       stickerRequest,
       imageRequest,
+      imageUnderstandingProvider: message.inputKind === 'media' ? config.imageUnderstanding.provider : undefined,
       weatherFollowup: weatherLookupText !== message.text,
       weatherStatus: weatherContext?.status,
       weatherConfidence: weatherContext?.confidence,
@@ -1317,6 +1374,11 @@ const server = http.createServer(async (request, response) => {
           weatherEnabled: config.weather.enabled,
           weatherProvider: config.weather.provider,
           imageGeneratorConfigured: Boolean(config.imageGenerator.apiKey),
+          imageUnderstandingProvider: config.imageUnderstanding.provider,
+          imageUnderstandingConfigured:
+            config.imageUnderstanding.provider === 'codex-cli' ||
+            config.imageUnderstanding.provider === 'custom' ||
+            Boolean(config.imageUnderstanding.apiKey),
           speechConfigured: Boolean(config.speech.apiKey),
           transcriberModel: config.transcriber.model,
           transcriberConfigured: Boolean(config.transcriber.apiKey)

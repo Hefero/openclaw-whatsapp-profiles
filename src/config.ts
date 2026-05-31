@@ -51,6 +51,7 @@ const guidanceProfileSchema = z.object({
       webSearch: z.boolean().default(false),
       localRead: z.boolean().default(false),
       weather: z.boolean().default(false),
+      imageUnderstanding: z.boolean().default(false),
       imageGeneration: z.boolean().default(false),
       stickerGeneration: z.boolean().default(false)
     })
@@ -179,6 +180,19 @@ export type AppConfig = {
     outputFormat: 'png' | 'jpeg' | 'webp';
     timeoutMs: number;
   };
+  imageUnderstanding: {
+    provider: 'off' | 'openai' | 'custom' | 'codex-cli';
+    baseUrl: string;
+    apiKey?: string;
+    model: string;
+    timeoutMs: number;
+    maxImageBytes: number;
+    detail: 'auto' | 'low' | 'high';
+    codexBin: string;
+    codexSandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
+    codexWorkdir: string;
+    maxPromptChars: number;
+  };
   speech: {
     baseUrl: string;
     apiKey?: string;
@@ -241,6 +255,12 @@ export function loadConfig(): AppConfig {
     proxyTranscriberProvider === 'local-whisper'
       ? process.env.WHISPER_LOCAL_MODEL ?? 'base'
       : 'gpt-4o-mini-transcribe';
+  const imageUnderstandingProvider = z
+    .enum(['off', 'openai', 'custom', 'codex-cli'])
+    .parse(
+      process.env.IMAGE_UNDERSTANDING_PROVIDER ??
+        (codexProxyEnabled && proxyMediaProvider === 'codex-cli' ? 'codex-cli' : 'openai')
+    );
   const weatherCountryCode = process.env.WEATHER_GEOCODING_COUNTRY_CODE?.trim().toUpperCase();
 
   return {
@@ -288,6 +308,33 @@ export function loadConfig(): AppConfig {
       quality: process.env.IMAGE_GENERATOR_QUALITY ?? 'low',
       outputFormat: z.enum(['png', 'jpeg', 'webp']).parse(process.env.IMAGE_GENERATOR_OUTPUT_FORMAT ?? 'png'),
       timeoutMs: Number(process.env.IMAGE_GENERATOR_TIMEOUT_MS ?? '120000')
+    },
+    imageUnderstanding: {
+      provider: imageUnderstandingProvider,
+      baseUrl: process.env.IMAGE_UNDERSTANDING_BASE_URL ?? 'https://api.openai.com/v1',
+      apiKey:
+        process.env.IMAGE_UNDERSTANDING_API_KEY ??
+        process.env.OPENAI_API_KEY ??
+        (codexProxyEnabled ? undefined : process.env.RESPONDER_API_KEY),
+      model:
+        process.env.IMAGE_UNDERSTANDING_MODEL ??
+        (imageUnderstandingProvider === 'codex-cli'
+          ? process.env.CODEX_PROXY_MEDIA_CODEX_MODEL ?? process.env.CODEX_PROXY_MODEL ?? 'gpt-5.4-mini'
+          : 'gpt-4o-mini'),
+      timeoutMs: Number(process.env.IMAGE_UNDERSTANDING_TIMEOUT_MS ?? '120000'),
+      maxImageBytes: Number(process.env.IMAGE_UNDERSTANDING_MAX_IMAGE_BYTES ?? String(10 * 1024 * 1024)),
+      detail: z.enum(['auto', 'low', 'high']).parse(process.env.IMAGE_UNDERSTANDING_DETAIL ?? 'auto'),
+      codexBin: process.env.IMAGE_UNDERSTANDING_CODEX_BIN ?? process.env.CODEX_PROXY_CODEX_BIN ?? (process.platform === 'win32' ? 'codex.cmd' : 'codex'),
+      codexSandbox: z
+        .enum(['read-only', 'workspace-write', 'danger-full-access'])
+        .parse(
+          process.env.IMAGE_UNDERSTANDING_CODEX_SANDBOX ??
+            process.env.CODEX_PROXY_MEDIA_CODEX_SANDBOX ??
+            process.env.CODEX_PROXY_SANDBOX ??
+            'read-only'
+        ),
+      codexWorkdir: path.resolve(process.env.IMAGE_UNDERSTANDING_CODEX_WORKDIR ?? process.env.CODEX_PROXY_WORKDIR ?? '.'),
+      maxPromptChars: Number(process.env.IMAGE_UNDERSTANDING_MAX_PROMPT_CHARS ?? process.env.CODEX_PROXY_MAX_PROMPT_CHARS ?? '20000')
     },
     speech: {
       baseUrl: process.env.SPEECH_BASE_URL ?? mediaBaseUrlDefault,

@@ -31,6 +31,7 @@ const fallbackProfile: GuidanceProfile = {
     webSearch: false,
     localRead: false,
     weather: false,
+    imageUnderstanding: false,
     imageGeneration: false,
     stickerGeneration: false
   },
@@ -107,7 +108,7 @@ export function buildGuidancePrompt(
     `Idioma: ${profile.language}`,
     `Tom: ${profile.tone}`,
     `Politica de identidade: ${profile.identityPolicy}`,
-    `Ferramentas permitidas: webSearch=${profile.tools.webSearch}, localRead=${profile.tools.localRead}, weather=${profile.tools.weather}, imageGeneration=${profile.tools.imageGeneration}, stickerGeneration=${profile.tools.stickerGeneration}`,
+    `Ferramentas permitidas: webSearch=${profile.tools.webSearch}, localRead=${profile.tools.localRead}, weather=${profile.tools.weather}, imageUnderstanding=${profile.tools.imageUnderstanding}, imageGeneration=${profile.tools.imageGeneration}, stickerGeneration=${profile.tools.stickerGeneration}`,
     `Audio permitido: voice=${profile.voice.enabled}, transcribe=${profile.voice.transcribe}, language=${profile.voice.language ?? 'auto'}, replyAudio=${profile.voice.reply.enabled ? profile.voice.reply.mode : 'off'}`,
     structuredContext.weather
       ? `Contexto meteorologico estruturado:\n${structuredContext.weather}`

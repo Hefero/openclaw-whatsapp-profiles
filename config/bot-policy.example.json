@@ -20,6 +20,7 @@
         "webSearch": false,
         "localRead": false,
         "weather": false,
+        "imageUnderstanding": false,
         "imageGeneration": false,
         "stickerGeneration": false
       },
@@ -57,6 +58,7 @@
         "webSearch": false,
         "localRead": false,
         "weather": true,
+        "imageUnderstanding": false,
         "imageGeneration": false,
         "stickerGeneration": false
       },
@@ -95,6 +97,7 @@
         "webSearch": true,
         "localRead": false,
         "weather": true,
+        "imageUnderstanding": false,
         "imageGeneration": false,
         "stickerGeneration": false
       },

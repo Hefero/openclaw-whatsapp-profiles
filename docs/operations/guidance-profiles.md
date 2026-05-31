@@ -106,6 +106,7 @@ Profiles can opt into responder tools:
     "webSearch": true,
     "localRead": false,
     "weather": true,
+    "imageUnderstanding": false,
     "imageGeneration": false,
     "stickerGeneration": false
   }
@@ -115,6 +116,7 @@ Profiles can opt into responder tools:
 - `webSearch`: when using `codex-proxy`, requests for that profile run Codex with live web search enabled. Keep this disabled for profiles that should never send message context to external search.
 - `localRead`: tells the responder it may inspect local files when explicitly asked. Actual access is still limited by `CODEX_PROXY_SANDBOX`, `CODEX_PROXY_WORKDIR`, and Codex config. With the default `read-only` sandbox, writes remain blocked.
 - `weather`: lets the worker resolve weather requests through structured Open-Meteo forecast/geocoding calls before the responder runs. It uses a city in the message, decimal coordinates in the message, or WhatsApp shared-location fields (`LocationLat`/`LocationLon`) when OpenClaw provides them. If no location is available, the responder is instructed to ask for a city/bairro or a WhatsApp location instead of inventing a forecast.
+- `imageUnderstanding`: lets the worker inspect inbound WhatsApp images, extract OCR/visual context, and pass that extracted text into the normal responder flow. This is separate from image generation.
 - `imageGeneration`: lets the worker detect image creation requests, call the configured Image API, save the generated image under `MEDIA_OUTPUT_DIR`, and send it with `openclaw message send --media`.
 - `stickerGeneration`: lets the worker detect WhatsApp sticker/figurinha requests, generate an image, remove chroma-key backgrounds during conversion, clean transparent pixels with Pillow, write a 512x512 exact-alpha WebP sticker, and send it through OpenClaw's WhatsApp `upload-file` action as a native sticker.
 
@@ -149,6 +151,23 @@ CODEX_PROXY_MEDIA_API_KEY=your-openai-api-key
 ```
 
 For local testing without an image API key, use `CODEX_PROXY_MEDIA_PROVIDER=codex-cli` with `CODEX_PROXY_MEDIA_CODEX_MODEL=gpt-5.5`.
+
+Inbound image understanding/OCR is configured separately from generation. Direct API mode:
+
+```text
+IMAGE_UNDERSTANDING_PROVIDER=openai
+IMAGE_UNDERSTANDING_BASE_URL=https://api.openai.com/v1
+IMAGE_UNDERSTANDING_API_KEY=your-openai-api-key
+IMAGE_UNDERSTANDING_MODEL=gpt-4o-mini
+IMAGE_UNDERSTANDING_TIMEOUT_MS=120000
+```
+
+Local Codex CLI mode reads the WhatsApp image from its local `mediaPath`:
+
+```text
+IMAGE_UNDERSTANDING_PROVIDER=codex-cli
+IMAGE_UNDERSTANDING_CODEX_SANDBOX=danger-full-access
+```
 
 Sticker generation uses the same image provider, plus FFmpeg and Pillow for WebP conversion:
 

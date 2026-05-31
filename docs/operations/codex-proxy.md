@@ -168,6 +168,28 @@ SPEECH_RESPONSE_FORMAT=opus
 
 Install the optional Python packages with `npm run tts:install`. The Edge backend needs `edge-tts`. The Piper backend needs `piper-tts` and local voice files. Use `CODEX_PROXY_LOCAL_SPEECH_ENGINE=piper`, `CODEX_PROXY_LOCAL_SPEECH_VOICE=pt_BR-jeff-medium`, and `CODEX_PROXY_LOCAL_TTS_VOICES_DIR=./voices` for fully local Piper output.
 
+## Inbound Image Understanding
+
+Inbound WhatsApp image understanding is profile-gated with `tools.imageUnderstanding=true`. It is separate from image generation: before the responder runs, the worker reads the inbound image, extracts OCR/visual context, and passes that extracted context into the normal reply prompt.
+
+Direct API mode:
+
+```text
+IMAGE_UNDERSTANDING_PROVIDER=openai
+IMAGE_UNDERSTANDING_BASE_URL=https://api.openai.com/v1
+IMAGE_UNDERSTANDING_API_KEY=your-openai-api-key
+IMAGE_UNDERSTANDING_MODEL=gpt-4o-mini
+IMAGE_UNDERSTANDING_TIMEOUT_MS=120000
+```
+
+Local Codex CLI mode reads OpenClaw's local `mediaPath` directly. When `CODEX_PROXY_ENABLED=true` and `CODEX_PROXY_MEDIA_PROVIDER=codex-cli`, this is the default unless `IMAGE_UNDERSTANDING_PROVIDER` overrides it:
+
+```text
+IMAGE_UNDERSTANDING_PROVIDER=codex-cli
+IMAGE_UNDERSTANDING_CODEX_SANDBOX=danger-full-access
+IMAGE_UNDERSTANDING_MODEL=gpt-5.5
+```
+
 ## Stickers
 
 Sticker requests are profile-gated with `tools.stickerGeneration=true`. The worker routes sticker intent before normal image intent, uses the configured image provider, and then converts the generated source image into a native WhatsApp sticker.
