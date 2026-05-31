@@ -170,6 +170,9 @@ export type AppConfig = {
   media: {
     outputDir: string;
     ffmpegCommand?: string;
+    referenceMaxImages: number;
+    referenceMaxAgeMinutes: number;
+    referenceMaxImageBytes: number;
   };
   imageGenerator: {
     baseUrl: string;
@@ -298,7 +301,10 @@ export function loadConfig(): AppConfig {
         process.env.MEDIA_FFMPEG_COMMAND ??
           process.env.CODEX_PROXY_FFMPEG_COMMAND ??
           process.env.WHISPER_LOCAL_FFMPEG_COMMAND
-      )
+      ),
+      referenceMaxImages: Number(process.env.MEDIA_REFERENCE_MAX_IMAGES ?? '5'),
+      referenceMaxAgeMinutes: Number(process.env.MEDIA_REFERENCE_MAX_AGE_MINUTES ?? '120'),
+      referenceMaxImageBytes: Number(process.env.MEDIA_REFERENCE_MAX_IMAGE_BYTES ?? String(20 * 1024 * 1024))
     },
     imageGenerator: {
       baseUrl: process.env.IMAGE_GENERATOR_BASE_URL ?? mediaBaseUrlDefault,

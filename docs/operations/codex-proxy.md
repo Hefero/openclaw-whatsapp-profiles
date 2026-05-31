@@ -11,9 +11,10 @@ The public/default setup is direct API key mode. `codex-proxy` is optional for u
 - `POST /v1/chat/completions`
 - `POST /v1/audio/transcriptions`
 - `POST /v1/images/generations`
+- `POST /v1/images/edits`
 - `POST /v1/audio/speech`
 
-Streaming is not implemented. Transcription endpoints are provider pass-through. Image and speech endpoints are provider pass-through in `openai` and `custom` media modes; in `codex-cli` media mode, image generation runs an ephemeral Codex CLI request and speech generation uses a local TTS backend.
+Streaming is not implemented. Transcription endpoints are provider pass-through. Image and speech endpoints are provider pass-through in `openai` and `custom` media modes; in `codex-cli` media mode, image generation and image edits/reference generation run ephemeral Codex CLI requests and speech generation uses a local TTS backend.
 
 ## Direct API Mode
 
@@ -119,7 +120,7 @@ When `CODEX_PROXY_ENABLED=false`, the worker can bypass `codex-proxy` and call t
 
 ## Image And Speech Generation
 
-`codex-proxy` can expose OpenAI-compatible `/v1/images/generations` and `/v1/audio/speech` endpoints. In `openai` or `custom` mode, these endpoints forward JSON requests to the configured media provider and return the provider response to the worker.
+`codex-proxy` can expose OpenAI-compatible `/v1/images/generations`, `/v1/images/edits`, and `/v1/audio/speech` endpoints. In `openai` or `custom` mode, these endpoints forward requests to the configured media provider and return the provider response to the worker.
 
 ```text
 CODEX_PROXY_ENABLED=true
@@ -152,7 +153,7 @@ SPEECH_RESPONSE_FORMAT=opus
 OPENCLAW_COMMAND_TIMEOUT_MS=120000
 ```
 
-In `codex-cli` media mode, `/v1/images/generations` runs an ephemeral Codex CLI request and returns an OpenAI-compatible `b64_json` image response. Keep the worker, proxy media, and dispatch timeouts aligned because image generation can take around two minutes. `/v1/audio/speech` supports `response_format=wav` or `response_format=opus`; use Opus for WhatsApp so the channel can send an Ogg/Opus voice file without doing its own FFmpeg transcode.
+In `codex-cli` media mode, `/v1/images/generations` runs an ephemeral Codex CLI request and returns an OpenAI-compatible `b64_json` image response. `/v1/images/edits` accepts multipart reference images, saves them temporarily, and asks Codex to generate the final PNG from those local paths. Keep the worker, proxy media, and dispatch timeouts aligned because image generation can take around two minutes. `/v1/audio/speech` supports `response_format=wav` or `response_format=opus`; use Opus for WhatsApp so the channel can send an Ogg/Opus voice file without doing its own FFmpeg transcode.
 
 Local speech defaults to Windows `System.Speech`. For better voices, use the repo-local `scripts/local-tts.py` adapter:
 
@@ -170,7 +171,7 @@ Install the optional Python packages with `npm run tts:install`. The Edge backen
 
 ## Inbound Image Understanding
 
-Inbound WhatsApp image understanding is profile-gated with `tools.imageUnderstanding=true`. It is separate from image generation: before the responder runs, the worker reads the inbound image, extracts OCR/visual context, and passes that extracted context into the normal reply prompt.
+Inbound WhatsApp image understanding is profile-gated with `tools.imageUnderstanding=true`. It is separate from image generation: before the responder runs, the worker reads the inbound image, extracts OCR/visual context, stores the recent image as a chat-local reference, and passes extracted context into the normal reply prompt.
 
 Direct API mode:
 
@@ -190,9 +191,17 @@ IMAGE_UNDERSTANDING_CODEX_SANDBOX=danger-full-access
 IMAGE_UNDERSTANDING_MODEL=gpt-5.5
 ```
 
+Recent image references are used when a later image or sticker request says things like "usa essas fotos", "dessa pessoa", "transforma isso em figurinha", or "com base nas imagens". The worker sends up to `MEDIA_REFERENCE_MAX_IMAGES` references to `/v1/images/edits`:
+
+```text
+MEDIA_REFERENCE_MAX_IMAGES=5
+MEDIA_REFERENCE_MAX_AGE_MINUTES=120
+MEDIA_REFERENCE_MAX_IMAGE_BYTES=20971520
+```
+
 ## Stickers
 
-Sticker requests are profile-gated with `tools.stickerGeneration=true`. The worker routes sticker intent before normal image intent, uses the configured image provider, and then converts the generated source image into a native WhatsApp sticker.
+Sticker requests are profile-gated with `tools.stickerGeneration=true`. The worker routes sticker intent before normal image intent, uses the configured image provider, optionally includes recent inbound image references, and then converts the generated source image into a native WhatsApp sticker.
 
 The sticker prompt asks the image provider for a flat `#00ff00` chroma-key background. Conversion removes that chroma key with FFmpeg, cleans low-alpha pixels with Pillow, and saves a 512x512 lossless WebP with exact alpha so WhatsApp clients do not show chroma-key color in transparent areas.
 
@@ -218,7 +227,7 @@ For the local Codex proxy:
 - Runs `codex exec --ephemeral`.
 - Uses read-only sandbox by default.
 - Enables Codex `--search` only when both `CODEX_PROXY_ALLOW_WEB_SEARCH=true` and the active guidance profile has `tools.webSearch=true`.
-- Keeps transcription calls as explicit provider pass-throughs. Media calls are explicit too: `openai` and `custom` modes pass through to the configured provider, while `codex-cli` image generation intentionally runs an ephemeral Codex CLI request and local speech intentionally runs the configured local TTS backend.
+- Keeps transcription calls as explicit provider pass-throughs. Media calls are explicit too: `openai` and `custom` modes pass through to the configured provider, while `codex-cli` image generation/editing intentionally runs an ephemeral Codex CLI request and local speech intentionally runs the configured local TTS backend.
 
 `tools.localRead=true` is a profile-level permission for local inspection, not a global filesystem unlock. Actual file access is still constrained by Codex sandbox/config. Keep `CODEX_PROXY_SANDBOX=read-only` unless you intentionally want the responder to write files.
 

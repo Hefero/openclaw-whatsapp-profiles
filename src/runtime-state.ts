@@ -14,14 +14,27 @@ const conversationEntrySchema = z.object({
   createdAt: z.number()
 });
 
+const imageReferenceSchema = z.object({
+  id: z.string(),
+  path: z.string().optional(),
+  url: z.string().optional(),
+  type: z.string().optional(),
+  fileName: z.string().optional(),
+  caption: z.string().optional(),
+  context: z.string().optional(),
+  createdAt: z.number()
+});
+
 const stateSchema = z.object({
   seenByTarget: z.record(z.array(z.string())).default({}),
   outbound: z.array(outboundSchema).default([]),
-  conversationByTarget: z.record(z.array(conversationEntrySchema)).default({})
+  conversationByTarget: z.record(z.array(conversationEntrySchema)).default({}),
+  imageReferencesByTarget: z.record(z.array(imageReferenceSchema)).default({})
 });
 
 export type RuntimeState = z.infer<typeof stateSchema>;
 export type ConversationEntry = z.infer<typeof conversationEntrySchema>;
+export type ImageReferenceEntry = z.infer<typeof imageReferenceSchema>;
 
 const statePath = path.resolve('./data/openclaw-worker-state.json');
 
@@ -74,6 +87,41 @@ export function rememberConversationEntry(
     ...existing,
     { role, text: normalized, createdAt: Date.now() }
   ].slice(-100);
+}
+
+export function rememberImageReference(
+  state: RuntimeState,
+  target: string,
+  reference: Omit<ImageReferenceEntry, 'createdAt'> & { createdAt?: number }
+): void {
+  if (!reference.path && !reference.url) {
+    return;
+  }
+
+  const existing = state.imageReferencesByTarget[target] ?? [];
+  state.imageReferencesByTarget[target] = [
+    ...existing.filter((item) => item.id !== reference.id),
+    { ...reference, createdAt: reference.createdAt ?? Date.now() }
+  ].slice(-50);
+}
+
+export function getRecentImageReferences(
+  state: RuntimeState,
+  target: string,
+  opts: {
+    maxImages: number;
+    maxAgeMinutes: number;
+  }
+): ImageReferenceEntry[] {
+  if (opts.maxImages <= 0) {
+    return [];
+  }
+
+  const cutoff = Date.now() - opts.maxAgeMinutes * 60 * 1000;
+  return (state.imageReferencesByTarget[target] ?? [])
+    .filter((item) => item.createdAt >= cutoff)
+    .filter((item) => Boolean(item.path || item.url))
+    .slice(-opts.maxImages);
 }
 
 export function getConversationContext(

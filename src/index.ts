@@ -15,9 +15,11 @@ import {
 import {
   convertImageToStickerFile,
   generateImageFile,
+  type ImageReferenceInput,
   imagePromptFromMessage,
   isAudioReplyRequested,
   isLikelyImageGenerationRequest,
+  isLikelyImageReferenceRequest,
   isLikelyStickerGenerationRequest,
   stickerPromptFromMessage,
   synthesizeSpeechFile
@@ -28,11 +30,13 @@ import { generateDraftReply } from './responder.js';
 import { hasRetroactiveReplyTargets, runRetroactiveReplyScan } from './retroactive-replies.js';
 import {
   getConversationContext,
+  getRecentImageReferences,
   hasSeen,
   isRecentOutbound,
   loadRuntimeState,
   markSeen,
   countRecentOutbound,
+  rememberImageReference,
   rememberConversationEntry,
   rememberOutbound,
   saveRuntimeState
@@ -60,6 +64,8 @@ type InboundMessage = {
   inputKind: 'text' | 'voice' | 'media';
   raw: InboundPayload;
   media?: InboundMedia;
+  mediaCaption?: string;
+  imageContext?: string;
 };
 
 type TypingPolicyResult = {
@@ -418,7 +424,9 @@ async function resolveMessageFromSeed(
           : fallbackImageUnderstandingMessage(result.reason, seed.text),
         inputKind: 'media',
         raw: seed.raw,
-        media: seed.media
+        media: seed.media,
+        mediaCaption: seed.text,
+        imageContext: result.ok ? result.text : undefined
       };
     }
 
@@ -656,6 +664,48 @@ function userVisibleMediaFailure(
   return 'Nao consegui mandar em audio agora. Vai por texto mesmo.';
 }
 
+function rememberInboundImageReference(
+  state: ReturnType<typeof loadRuntimeState>,
+  message: InboundMessage
+): boolean {
+  if (!isLikelyImageMedia(message.media)) {
+    return false;
+  }
+
+  rememberImageReference(state, message.remoteJid, {
+    id: message.id,
+    path: message.media?.path,
+    url: message.media?.url,
+    type: message.media?.type,
+    fileName: message.media?.fileName,
+    caption: message.mediaCaption,
+    context: message.imageContext
+  });
+  return true;
+}
+
+function imageReferencesForRequest(
+  state: ReturnType<typeof loadRuntimeState>,
+  message: InboundMessage,
+  config: AppConfig
+): ImageReferenceInput[] {
+  if (!isLikelyImageReferenceRequest(message.text)) {
+    return [];
+  }
+
+  return getRecentImageReferences(state, message.remoteJid, {
+    maxImages: config.media.referenceMaxImages,
+    maxAgeMinutes: config.media.referenceMaxAgeMinutes
+  }).map((reference) => ({
+    path: reference.path,
+    url: reference.url,
+    type: reference.type,
+    fileName: reference.fileName,
+    caption: reference.caption,
+    context: reference.context
+  }));
+}
+
 function resolveTypingPolicyForInbound(payload: InboundPayload): TypingPolicyResult {
   const config = loadConfig();
 
@@ -828,6 +878,9 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     saveRuntimeState(state);
   }
   const guidance = resolveGuidance(message.remoteJid, config.policy);
+  if (target && guidance.profile.tools.imageUnderstanding && rememberInboundImageReference(state, message)) {
+    saveRuntimeState(state);
+  }
   const rememberAutoReply = (text: string): void => {
     rememberOutbound(state, message.remoteJid, text);
     if (target && contextSettings.enabled) {
@@ -851,6 +904,8 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
   const weatherFinishedAt = Date.now();
   const stickerRequest = isLikelyStickerGenerationRequest(message.text);
   const imageRequest = isLikelyImageGenerationRequest(message.text);
+  const imageReferences =
+    stickerRequest || imageRequest ? imageReferencesForRequest(state, message, config) : [];
 
   logger.info(
     {
@@ -861,6 +916,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       textChars: message.text.length,
       stickerRequest,
       imageRequest,
+      imageReferenceCount: imageReferences.length,
       imageUnderstandingProvider: message.inputKind === 'media' ? config.imageUnderstanding.provider : undefined,
       weatherFollowup: weatherLookupText !== message.text,
       weatherStatus: weatherContext?.status,
@@ -940,14 +996,17 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
         messageId: message.id,
         imageModel: config.imageGenerator.model,
         imageTimeoutMs: config.imageGenerator.timeoutMs,
+        imageReferenceCount: imageReferences.length,
         stickerSize: config.sticker.size
       },
       'sticker generation started'
     );
     const generated = await generateImageFile({
-      prompt: stickerPromptFromMessage(message.text),
+      prompt: stickerPromptFromMessage(message.text, imageReferences),
       config: config.imageGenerator,
-      outputDir: config.media.outputDir
+      outputDir: config.media.outputDir,
+      references: imageReferences,
+      maxReferenceBytes: config.media.referenceMaxImageBytes
     });
 
     if (!generated.ok) {
@@ -1138,9 +1197,11 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
 
     const mediaStartedAt = Date.now();
     const generated = await generateImageFile({
-      prompt: imagePromptFromMessage(message.text),
+      prompt: imagePromptFromMessage(message.text, imageReferences),
       config: config.imageGenerator,
-      outputDir: config.media.outputDir
+      outputDir: config.media.outputDir,
+      references: imageReferences,
+      maxReferenceBytes: config.media.referenceMaxImageBytes
     });
     const mediaFinishedAt = Date.now();
 

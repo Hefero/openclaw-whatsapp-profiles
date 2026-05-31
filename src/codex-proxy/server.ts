@@ -96,6 +96,17 @@ const imageGenerationRequestSchema = z
   })
   .passthrough();
 
+const imageEditFieldsSchema = z
+  .object({
+    model: z.string().optional(),
+    prompt: z.string().min(1).max(12000),
+    n: z.string().optional(),
+    size: z.string().optional(),
+    quality: z.string().optional(),
+    output_format: z.enum(['png', 'jpeg', 'webp']).optional()
+  })
+  .passthrough();
+
 const speechRequestSchema = z
   .object({
     model: z.string().optional(),
@@ -412,6 +423,130 @@ function parseJsonBody(body: Buffer): unknown {
   return body.byteLength ? JSON.parse(body.toString('utf8')) : {};
 }
 
+type MultipartPart = {
+  name: string;
+  filename?: string;
+  contentType?: string;
+  data: Buffer;
+};
+
+function parseHeaderParameters(value: string | undefined): Record<string, string> {
+  const params: Record<string, string> = {};
+  if (!value) {
+    return params;
+  }
+
+  for (const part of value.split(';').slice(1)) {
+    const [rawKey, ...rawValue] = part.split('=');
+    const key = rawKey?.trim().toLowerCase();
+    if (!key) {
+      continue;
+    }
+
+    const joinedValue = rawValue.join('=').trim();
+    params[key] = joinedValue.replace(/^"|"$/g, '');
+  }
+
+  return params;
+}
+
+function parseMultipartBody(body: Buffer, contentType: string | undefined): MultipartPart[] {
+  const boundaryMatch = contentType?.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  const boundaryText = boundaryMatch?.[1] ?? boundaryMatch?.[2];
+  if (!boundaryText) {
+    throw new Error('multipart boundary missing');
+  }
+
+  const boundary = Buffer.from(`--${boundaryText}`);
+  const headerSeparator = Buffer.from('\r\n\r\n');
+  const parts: MultipartPart[] = [];
+  let cursor = body.indexOf(boundary);
+
+  while (cursor >= 0) {
+    cursor += boundary.length;
+    if (body[cursor] === 45 && body[cursor + 1] === 45) {
+      break;
+    }
+    if (body[cursor] === 13 && body[cursor + 1] === 10) {
+      cursor += 2;
+    }
+
+    const headerEnd = body.indexOf(headerSeparator, cursor);
+    if (headerEnd < 0) {
+      break;
+    }
+
+    const nextBoundary = body.indexOf(boundary, headerEnd + headerSeparator.length);
+    if (nextBoundary < 0) {
+      break;
+    }
+
+    const headerLines = body
+      .subarray(cursor, headerEnd)
+      .toString('utf8')
+      .split(/\r?\n/u);
+    const headers: Record<string, string> = {};
+    for (const line of headerLines) {
+      const separator = line.indexOf(':');
+      if (separator > 0) {
+        headers[line.slice(0, separator).trim().toLowerCase()] = line.slice(separator + 1).trim();
+      }
+    }
+
+    const dispositionParams = parseHeaderParameters(headers['content-disposition']);
+    let dataEnd = nextBoundary;
+    if (dataEnd >= 2 && body[dataEnd - 2] === 13 && body[dataEnd - 1] === 10) {
+      dataEnd -= 2;
+    }
+
+    if (dispositionParams.name) {
+      parts.push({
+        name: dispositionParams.name,
+        filename: dispositionParams.filename,
+        contentType: headers['content-type'],
+        data: body.subarray(headerEnd + headerSeparator.length, dataEnd)
+      });
+    }
+
+    cursor = nextBoundary;
+  }
+
+  return parts;
+}
+
+function multipartTextFields(parts: MultipartPart[]): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const part of parts) {
+    if (!part.filename) {
+      fields[part.name] = part.data.toString('utf8');
+    }
+  }
+  return fields;
+}
+
+function imageExtensionFromPart(part: MultipartPart, index: number): string {
+  const name = part.filename?.toLowerCase() ?? '';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) {
+    return 'jpg';
+  }
+  if (name.endsWith('.webp')) {
+    return 'webp';
+  }
+  if (name.endsWith('.gif')) {
+    return 'gif';
+  }
+  if (part.contentType?.includes('jpeg')) {
+    return 'jpg';
+  }
+  if (part.contentType?.includes('webp')) {
+    return 'webp';
+  }
+  if (part.contentType?.includes('gif')) {
+    return 'gif';
+  }
+  return index >= 0 ? 'png' : 'bin';
+}
+
 async function validatePng(filePath: string): Promise<void> {
   const file = await fs.readFile(filePath);
   const signature = file.subarray(0, 8).toString('hex');
@@ -502,6 +637,103 @@ async function generateCodexImageResponse(body: Buffer, response: http.ServerRes
   }
 
   await sendCodexImageFileResponse(response, outputPath, result);
+}
+
+function buildCodexImageEditPrompt(input: {
+  fields: z.infer<typeof imageEditFieldsSchema>;
+  imagePaths: string[];
+  outputPath: string;
+}): string {
+  return [
+    'Use a ferramenta nativa real de geracao/edicao de imagens disponivel no Codex CLI.',
+    'Gere exatamente uma imagem final usando todas as imagens de referencia abaixo como base visual.',
+    'As referencias podem representar a mesma pessoa, produto, objeto, estilo, design ou composicao. Preserve os elementos consistentes que forem relevantes ao pedido do usuario.',
+    '',
+    `Pedido do usuario:\n${input.fields.prompt}`,
+    '',
+    'Imagens de referencia locais:',
+    ...input.imagePaths.map((imagePath, index) => `${index + 1}. ${imagePath}`),
+    '',
+    input.fields.size ? `Tamanho desejado, se a ferramenta permitir: ${input.fields.size}.` : undefined,
+    input.fields.quality ? `Qualidade desejada, se a ferramenta permitir: ${input.fields.quality}.` : undefined,
+    `Salve a imagem final exatamente neste caminho como PNG: ${input.outputPath}`,
+    'Nao crie placeholder, SVG, HTML, canvas, gradiente simples, retangulo solido ou imagem programatica.',
+    'Nao inclua texto, legenda, marca d agua, logo ou interface dentro da imagem, exceto se o pedido solicitar explicitamente.',
+    'Depois de salvar, responda somente com o caminho do arquivo salvo.'
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+async function generateCodexImageEditResponse(
+  contentType: string | undefined,
+  body: Buffer,
+  response: http.ServerResponse
+): Promise<void> {
+  const parts = parseMultipartBody(body, contentType);
+  const fields = imageEditFieldsSchema.parse(multipartTextFields(parts));
+  const outputFormat = fields.output_format ?? 'png';
+  if (outputFormat !== 'png') {
+    sendJson(response, 400, {
+      error: {
+        message: 'codex-cli image edits currently support output_format=png only',
+        type: 'invalid_request_error'
+      }
+    });
+    return;
+  }
+
+  const imageParts = parts.filter(
+    (part) => Boolean(part.filename) && (part.name === 'image' || part.name === 'image[]' || part.name.startsWith('image['))
+  );
+  if (!imageParts.length) {
+    sendJson(response, 400, {
+      error: {
+        message: 'At least one image reference is required',
+        type: 'invalid_request_error'
+      }
+    });
+    return;
+  }
+
+  await fs.mkdir(mediaOutputDir(), { recursive: true });
+  const tempDir = await fs.mkdtemp(path.join(mediaOutputDir(), 'codex-edit-input-'));
+  const outputPath = generatedMediaPath('codex-image-edit', 'png');
+  const imagePaths: string[] = [];
+
+  try {
+    for (const [index, part] of imageParts.entries()) {
+      const imagePath = path.join(tempDir, `reference-${index + 1}.${imageExtensionFromPart(part, index)}`);
+      await fs.writeFile(imagePath, part.data);
+      imagePaths.push(imagePath);
+    }
+
+    const prompt = buildCodexImageEditPrompt({ fields, imagePaths, outputPath });
+    let result: Awaited<ReturnType<typeof runCodex>> | undefined;
+    try {
+      result = await enqueue(() =>
+        runCodex(prompt, {
+          ...runnerConfig,
+          model: serverConfig.mediaCodexModel,
+          sandbox: serverConfig.mediaCodexSandbox,
+          timeoutMs: serverConfig.mediaTimeoutMs,
+          maxPromptChars: Math.max(runnerConfig.maxPromptChars, 24000)
+        })
+      );
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      try {
+        await sendCodexImageFileResponse(response, outputPath, result, reason.slice(0, 500));
+        return;
+      } catch {
+        throw error;
+      }
+    }
+
+    await sendCodexImageFileResponse(response, outputPath, result);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 async function runSystemSpeech(inputPath: string, outputPath: string, voice: string | undefined): Promise<void> {
@@ -845,6 +1077,85 @@ async function forwardMediaJsonRequest(
   }
 }
 
+async function forwardMediaMultipartRequest(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  upstreamPath: '/images/edits'
+): Promise<void> {
+  if (serverConfig.mediaProvider === 'off') {
+    sendJson(response, 501, {
+      error: {
+        message: 'Image editing is disabled in codex-proxy',
+        type: 'not_implemented'
+      }
+    });
+    return;
+  }
+
+  if (serverConfig.mediaProvider === 'openai' && !serverConfig.mediaApiKey) {
+    sendJson(response, 500, {
+      error: {
+        message: 'CODEX_PROXY_MEDIA_API_KEY or OPENAI_API_KEY is required for openai image editing',
+        type: 'server_error'
+      }
+    });
+    return;
+  }
+
+  if (serverConfig.mediaProvider === 'custom' && !serverConfig.mediaBaseUrl) {
+    sendJson(response, 500, {
+      error: {
+        message: 'CODEX_PROXY_MEDIA_BASE_URL is required for custom image editing',
+        type: 'server_error'
+      }
+    });
+    return;
+  }
+
+  const contentType = request.headers['content-type'];
+  if (!contentType?.includes('multipart/form-data')) {
+    sendJson(response, 400, {
+      error: {
+        message: 'Expected multipart/form-data',
+        type: 'invalid_request_error'
+      }
+    });
+    return;
+  }
+
+  const body = await readRaw(request);
+
+  if (serverConfig.mediaProvider === 'codex-cli') {
+    await generateCodexImageEditResponse(contentType, body, response);
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), serverConfig.mediaTimeoutMs);
+
+  try {
+    const upstreamUrl = `${mediaBaseUrl().replace(/\/$/, '')}${upstreamPath}`;
+    const authHeader = mediaAuthHeader();
+    const upstream = await fetch(upstreamUrl, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': contentType,
+        ...(authHeader ? { authorization: authHeader } : {})
+      },
+      body
+    });
+    const upstreamBody = Buffer.from(await upstream.arrayBuffer());
+    response.writeHead(upstream.status, {
+      'content-type': upstream.headers.get('content-type') ?? 'application/json',
+      'content-length': upstreamBody.byteLength
+    });
+    response.end(upstreamBody);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? '127.0.0.1'}`);
@@ -901,6 +1212,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === 'POST' && url.pathname === '/v1/images/generations') {
       await forwardMediaJsonRequest(request, response, '/images/generations');
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/images/edits') {
+      await forwardMediaMultipartRequest(request, response, '/images/edits');
       return;
     }
 

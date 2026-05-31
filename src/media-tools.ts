@@ -18,6 +18,15 @@ export type GeneratedMedia = {
   path: string;
 };
 
+export type ImageReferenceInput = {
+  path?: string;
+  url?: string;
+  type?: string;
+  fileName?: string;
+  caption?: string;
+  context?: string;
+};
+
 export type MediaGenerationResult =
   | { ok: true; media: GeneratedMedia }
   | { ok: false; reason: string };
@@ -41,6 +50,21 @@ export function isLikelyImageGenerationRequest(text: string): boolean {
   return [
     /\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|desenha|desenhe|renderiza|renderize)\b.*\b(imagem|foto|figura|ilustracao|paisagem|avatar|wallpaper|desenho)\b/u,
     /\b(imagem|foto|figura|ilustracao|paisagem|avatar|wallpaper|desenho)\b.*\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|desenha|desenhe|manda|mande|mandi)\b/u
+  ].some((pattern) => pattern.test(normalized));
+}
+
+export function isLikelyImageReferenceRequest(text: string): boolean {
+  const normalized = normalizeIntentText(text);
+  if (!normalized || normalized.length > 1200) {
+    return false;
+  }
+
+  return [
+    /\b(essa|essas|esse|esses|esta|estas|este|estes|isso|isto|disso|disto|dela|dele|delas|deles|nela|nelas|nele|neles|aquelas|aqueles|anterior|anteriores|acima|ultima|ultimas)\b/u,
+    /\b(com base|a partir|usando|usa|use|usar|baseado|baseada|referencia|referencias)\b.*\b(imagem|imagens|foto|fotos|anexo|anexos|referencia|referencias)\b/u,
+    /\b(essa|essas|esse|esses|esta|estas|este|estes|dessa|dessas|desse|desses|desta|destas|deste|destes|nela|nelas|nele|neles|isso|isto|aquilo|aquelas|aqueles|ultimas|anteriores|acima|mandei|enviei)\b.*\b(imagem|imagens|foto|fotos|pessoa|rosto|design|referencia|referencias)\b/u,
+    /\b(imagem|imagens|foto|fotos|referencia|referencias)\b.*\b(essa|essas|esse|esses|dessa|dessas|desse|desses|mandei|enviei|acima|anterior|anteriores|use|usar|base)\b/u,
+    /\b(dessa pessoa|desse rosto|desse design|desse estilo|dessas pessoas|dessas fotos|dessas imagens|todas essas|todos esses)\b/u
   ].some((pattern) => pattern.test(normalized));
 }
 
@@ -72,7 +96,34 @@ export function isAudioReplyRequested(text: string): boolean {
   ].some((pattern) => pattern.test(normalized));
 }
 
-export function imagePromptFromMessage(text: string): string {
+function referencePromptLines(references: ImageReferenceInput[] | undefined): string[] {
+  if (!references?.length) {
+    return [];
+  }
+
+  const lines = [
+    `Use as ${references.length} imagem(ns) de referencia anexadas para entender assunto, pessoa, produto, design, estilo e detalhes visuais relevantes ao pedido.`,
+    'Quando as referencias forem da mesma pessoa ou objeto, preserve a identidade visual geral e os tracos consistentes, sem copiar artefatos ruins, fundo ou iluminacao acidental se o pedido pedir outro contexto.'
+  ];
+
+  const contextLines = references
+    .map((reference, index) => {
+      const parts = [
+        reference.caption?.trim() ? `legenda: ${reference.caption.trim()}` : undefined,
+        reference.context?.trim() ? `contexto visual: ${reference.context.trim().slice(0, 800)}` : undefined
+      ].filter(Boolean);
+      return parts.length ? `Referencia ${index + 1}: ${parts.join('; ')}` : undefined;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (contextLines.length) {
+    lines.push('Contexto extraido das referencias:', ...contextLines);
+  }
+
+  return lines;
+}
+
+export function imagePromptFromMessage(text: string, references: ImageReferenceInput[] = []): string {
   const trimmed = text.trim();
   if (!trimmed) {
     return 'Uma paisagem bonita, natural e bem iluminada.';
@@ -80,6 +131,7 @@ export function imagePromptFromMessage(text: string): string {
 
   return [
     trimmed,
+    ...referencePromptLines(references),
     'Crie uma imagem unica, visualmente clara e adequada para enviar em WhatsApp.',
     'Nao inclua texto, legenda, marca d agua ou interface dentro da imagem, a menos que o pedido solicite explicitamente.'
   ].join('\n');
@@ -92,12 +144,13 @@ function softenProtectedFranchiseReferences(text: string): string {
   );
 }
 
-export function stickerPromptFromMessage(text: string): string {
+export function stickerPromptFromMessage(text: string, references: ImageReferenceInput[] = []): string {
   const trimmed = text.trim();
   const subject = softenProtectedFranchiseReferences(trimmed) || 'Uma figurinha divertida e simples para WhatsApp.';
 
   return [
     subject,
+    ...referencePromptLines(references),
     'Crie uma imagem pensada para virar figurinha de WhatsApp: composicao quadrada, um assunto principal grande, claro e legivel em 512x512.',
     'Use fundo verde chroma-key perfeitamente plano #00ff00, sem sombras, gradientes ou textura. Nao use verde no assunto principal.',
     'Use alto contraste e contorno ou sombra suave no assunto principal para funcionar bem em tema claro e escuro depois que o fundo for removido.',
@@ -129,6 +182,51 @@ function extensionForImageFormat(format: AppConfig['imageGenerator']['outputForm
 function mediaPath(outputDir: string, prefix: string, extension: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   return path.join(outputDir, `${prefix}-${timestamp}-${crypto.randomUUID()}.${extension}`);
+}
+
+function fileNameForReference(reference: ImageReferenceInput, index: number): string {
+  const explicit = reference.fileName?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const fromPath = reference.path ? path.basename(reference.path) : '';
+  if (fromPath) {
+    return fromPath;
+  }
+
+  try {
+    const fromUrl = reference.url ? path.basename(new URL(reference.url).pathname) : '';
+    if (fromUrl) {
+      return fromUrl;
+    }
+  } catch {
+    // Fall through to a generated name.
+  }
+
+  return `reference-${index + 1}.png`;
+}
+
+function mimeFromReference(reference: ImageReferenceInput): string {
+  const explicit = reference.type?.trim();
+  if (explicit?.toLowerCase().startsWith('image/')) {
+    return explicit;
+  }
+
+  const name = (reference.fileName || reference.path || reference.url || '').toLowerCase();
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (name.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  if (name.endsWith('.gif')) {
+    return 'image/gif';
+  }
+  if (name.endsWith('.avif')) {
+    return 'image/avif';
+  }
+  return 'image/png';
 }
 
 async function errorText(response: Response): Promise<string> {
@@ -197,13 +295,147 @@ function stickerPythonCommand(): string {
   );
 }
 
+async function referenceBlob(
+  reference: ImageReferenceInput,
+  index: number,
+  config: AppConfig['imageGenerator'],
+  maxBytes: number
+): Promise<{ ok: true; blob: Blob; fileName: string } | { ok: false; reason: string }> {
+  if (reference.path) {
+    let stat;
+    try {
+      stat = await fs.stat(reference.path);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `reference image ${index + 1} path unreadable: ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
+
+    if (!stat.isFile()) {
+      return { ok: false, reason: `reference image ${index + 1} path is not a file` };
+    }
+    if (stat.size > maxBytes) {
+      return { ok: false, reason: `reference image ${index + 1} exceeds max bytes` };
+    }
+
+    const buffer = await fs.readFile(reference.path);
+    return {
+      ok: true,
+      blob: new Blob([buffer], { type: mimeFromReference(reference) }),
+      fileName: fileNameForReference(reference, index)
+    };
+  }
+
+  if (reference.url) {
+    const response = await fetchWithTimeout(reference.url, { method: 'GET' }, config.timeoutMs);
+    if (!response.ok) {
+      return { ok: false, reason: `reference image ${index + 1} download failed (${await errorText(response)})` };
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > maxBytes) {
+      return { ok: false, reason: `reference image ${index + 1} exceeds max bytes` };
+    }
+
+    return {
+      ok: true,
+      blob: new Blob([buffer], { type: response.headers.get('content-type') ?? mimeFromReference(reference) }),
+      fileName: fileNameForReference(reference, index)
+    };
+  }
+
+  return { ok: false, reason: `reference image ${index + 1} has no path or url` };
+}
+
+async function generateImageEditFile(input: {
+  prompt: string;
+  config: AppConfig['imageGenerator'];
+  outputDir: string;
+  references: ImageReferenceInput[];
+  maxReferenceBytes: number;
+}): Promise<MediaGenerationResult> {
+  if (!input.config.apiKey) {
+    return { ok: false, reason: 'image generator API key not configured' };
+  }
+
+  try {
+    await fs.mkdir(input.outputDir, { recursive: true });
+    const form = new FormData();
+    form.append('model', input.config.model);
+    form.append('prompt', input.prompt);
+    form.append('n', '1');
+    form.append('size', input.config.size);
+    form.append('quality', input.config.quality);
+    form.append('output_format', input.config.outputFormat);
+
+    for (const [index, reference] of input.references.entries()) {
+      const image = await referenceBlob(reference, index, input.config, input.maxReferenceBytes);
+      if (!image.ok) {
+        return image;
+      }
+      form.append('image[]', image.blob, image.fileName);
+    }
+
+    const response = await fetchWithTimeout(
+      `${input.config.baseUrl.replace(/\/$/, '')}/images/edits`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${input.config.apiKey}`
+        },
+        body: form
+      },
+      input.config.timeoutMs
+    );
+
+    if (!response.ok) {
+      return { ok: false, reason: `image edit failed (${await errorText(response)})` };
+    }
+
+    const data = (await response.json()) as ImageGenerationResponse;
+    const image = data.data?.[0];
+    const extension = extensionForImageFormat(input.config.outputFormat);
+    const outputPath = mediaPath(input.outputDir, 'image-edit', extension);
+    if (image?.b64_json) {
+      await fs.writeFile(outputPath, Buffer.from(image.b64_json, 'base64'));
+      return { ok: true, media: { path: outputPath } };
+    }
+
+    if (image?.url) {
+      const imageResponse = await fetchWithTimeout(image.url, { method: 'GET' }, input.config.timeoutMs);
+      if (!imageResponse.ok) {
+        return { ok: false, reason: `image edit download failed (${await errorText(imageResponse)})` };
+      }
+      await fs.writeFile(outputPath, Buffer.from(await imageResponse.arrayBuffer()));
+      return { ok: true, media: { path: outputPath } };
+    }
+
+    return { ok: false, reason: 'image edit returned no image data' };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function generateImageFile(input: {
   prompt: string;
   config: AppConfig['imageGenerator'];
   outputDir: string;
+  references?: ImageReferenceInput[];
+  maxReferenceBytes?: number;
 }): Promise<MediaGenerationResult> {
   if (!input.config.apiKey) {
     return { ok: false, reason: 'image generator API key not configured' };
+  }
+
+  if (input.references?.length) {
+    return generateImageEditFile({
+      prompt: input.prompt,
+      config: input.config,
+      outputDir: input.outputDir,
+      references: input.references,
+      maxReferenceBytes: input.maxReferenceBytes ?? 20 * 1024 * 1024
+    });
   }
 
   try {
