@@ -55,7 +55,7 @@ function buildToolInstruction(policy: ToolPolicy): string {
 
   if (policy.localRead) {
     instructions.push(
-      'Read-only local file inspection is allowed when the request explicitly asks for local files and the sandbox permits it. Do not write, edit, move, or delete files.'
+      'Read-only local file inspection is available when useful for the request and the sandbox permits it, including local files or image paths provided in the prompt. Do not write, edit, move, or delete files.'
     );
   } else {
     instructions.push('Do not run shell commands, inspect local files, edit files, or use local tools.');

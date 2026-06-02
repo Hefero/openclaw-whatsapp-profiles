@@ -17,16 +17,12 @@ import {
   generateImageFile,
   type ImageReferenceInput,
   imagePromptFromMessage,
-  isAudioReplyRequested,
-  isLikelyImageGenerationRequest,
-  isLikelyImageReferenceRequest,
-  isLikelyStickerGenerationRequest,
   stickerPromptFromMessage,
   synthesizeSpeechFile
 } from './media-tools.js';
 import { sendOpenClawMediaAsync, sendOpenClawStickerAsync, toOpenClawTarget } from './openclaw-cli.js';
 import { decideMessageAction } from './policy.js';
-import { generateDraftReply } from './responder.js';
+import { generateActionPlan, generateDraftReply, type AgentAction } from './responder.js';
 import { hasRetroactiveReplyTargets, runRetroactiveReplyScan } from './retroactive-replies.js';
 import {
   getConversationContext,
@@ -685,28 +681,6 @@ function rememberInboundImageReference(
   return true;
 }
 
-function imageReferencesForRequest(
-  state: ReturnType<typeof loadRuntimeState>,
-  message: InboundMessage,
-  config: AppConfig
-): ImageReferenceInput[] {
-  if (!isLikelyImageReferenceRequest(message.text)) {
-    return [];
-  }
-
-  return getRecentImageReferences(state, message.remoteJid, {
-    maxImages: config.media.referenceMaxImages,
-    maxAgeMinutes: config.media.referenceMaxAgeMinutes
-  }).map((reference) => ({
-    path: reference.path,
-    url: reference.url,
-    type: reference.type,
-    fileName: reference.fileName,
-    caption: reference.caption,
-    context: reference.context
-  }));
-}
-
 function recentImageReferencesForPrompt(
   state: ReturnType<typeof loadRuntimeState>,
   message: InboundMessage,
@@ -723,6 +697,20 @@ function recentImageReferencesForPrompt(
     caption: reference.caption,
     context: reference.context
   }));
+}
+
+function firstPlannedAction<T extends AgentAction['type']>(
+  actions: AgentAction[],
+  type: T
+): Extract<AgentAction, { type: T }> | undefined {
+  return actions.find((action): action is Extract<AgentAction, { type: T }> => action.type === type);
+}
+
+function promptFromPlannedAction(
+  action: Extract<AgentAction, { type: 'generate_image' | 'generate_sticker' }>,
+  fallback: string
+): string {
+  return action.prompt?.trim() || fallback;
 }
 
 function inboundQueueKey(payload: InboundPayload): string {
@@ -946,25 +934,55 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     }
     saveRuntimeState(state);
   };
-  const weatherLookupText = buildWeatherLookupText({
+  const availableImageReferences = recentImageReferencesForPrompt(state, message, config);
+  const plannerStartedAt = Date.now();
+  const actionPlan = await generateActionPlan({
+    remoteJid: message.remoteJid,
     text: message.text,
-    metadata: message.raw.context?.metadata,
-    conversationContext
+    policy: config.policy,
+    responder: config.responder,
+    conversationContext,
+    imageReferences: availableImageReferences,
+    canSendMedia: canSendOpenClawMedia(payload)
   });
+  const plannerFinishedAt = Date.now();
+  if (actionPlan.parseError) {
+    logger.warn(
+      {
+        target: targetLabel,
+        messageId: message.id,
+        plannerError: actionPlan.parseError,
+        raw: logReplyContent ? actionPlan.raw : undefined
+      },
+      'agent action plan unavailable'
+    );
+  }
+
+  const stickerAction = firstPlannedAction(actionPlan.actions, 'generate_sticker');
+  const imageAction = stickerAction ? undefined : firstPlannedAction(actionPlan.actions, 'generate_image');
+  const weatherAction = firstPlannedAction(actionPlan.actions, 'get_weather');
+  const audioAction = firstPlannedAction(actionPlan.actions, 'reply_audio');
+  const mediaAction = stickerAction ?? imageAction;
+  const stickerRequest = Boolean(stickerAction);
+  const imageRequest = Boolean(imageAction);
+  const imageReferences = mediaAction?.useRecentImages ? availableImageReferences : [];
+  const weatherLookupText = weatherAction
+    ? buildWeatherLookupText({
+        text: weatherAction.query ?? message.text,
+        metadata: message.raw.context?.metadata,
+        conversationContext
+      })
+    : message.text;
   const weatherStartedAt = Date.now();
-  const weatherContext = guidance.profile.tools.weather
+  const weatherContext = weatherAction && guidance.profile.tools.weather
     ? await resolveWeatherPromptContext({
         text: weatherLookupText,
         metadata: message.raw.context?.metadata,
-        weather: config.weather
+        weather: config.weather,
+        force: true
       })
     : undefined;
   const weatherFinishedAt = Date.now();
-  const stickerRequest = isLikelyStickerGenerationRequest(message.text);
-  const imageRequest = isLikelyImageGenerationRequest(message.text);
-  const availableImageReferences = recentImageReferencesForPrompt(state, message, config);
-  const imageReferences =
-    stickerRequest || imageRequest ? imageReferencesForRequest(state, message, config) : [];
 
   logger.info(
     {
@@ -973,6 +991,8 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       inputKind: message.inputKind,
       contextMessages: conversationContext.length,
       textChars: message.text.length,
+      plannerMs: plannerFinishedAt - plannerStartedAt,
+      plannedActions: actionPlan.actions.map((action) => action.type),
       stickerRequest,
       imageRequest,
       imageReferenceCount: availableImageReferences.length,
@@ -986,7 +1006,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     'openclaw inbound message normalized'
   );
 
-  if (stickerRequest) {
+  if (stickerAction) {
     const stickerReply = guidance.profile.tools.stickerGeneration
       ? 'Pedido de figurinha detectado. Em modo auto, vou gerar e enviar a figurinha.'
       : guidance.profile.identityPolicy === 'open'
@@ -1062,7 +1082,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       'sticker generation started'
     );
     const generated = await generateImageFile({
-      prompt: stickerPromptFromMessage(message.text, imageReferences),
+      prompt: stickerPromptFromMessage(promptFromPlannedAction(stickerAction, message.text), imageReferences),
       config: config.imageGenerator,
       outputDir: config.media.outputDir,
       references: imageReferences,
@@ -1192,7 +1212,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     return { ok: true, action: 'sent_media', media: 'sticker' };
   }
 
-  if (imageRequest) {
+  if (imageAction) {
     const imageReply = guidance.profile.tools.imageGeneration
       ? 'Pedido de imagem detectado. Em modo auto, vou gerar e enviar a imagem.'
       : guidance.profile.identityPolicy === 'open'
@@ -1257,7 +1277,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
 
     const mediaStartedAt = Date.now();
     const generated = await generateImageFile({
-      prompt: imagePromptFromMessage(message.text, imageReferences),
+      prompt: imagePromptFromMessage(promptFromPlannedAction(imageAction, message.text), imageReferences),
       config: config.imageGenerator,
       outputDir: config.media.outputDir,
       references: imageReferences,
@@ -1402,16 +1422,17 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     return { ok: true, action: 'blocked', reasons, reply };
   }
 
-  const audioRequested = isAudioReplyRequested(message.text);
+  const audioRequested = Boolean(audioAction);
   const shouldReplyWithAudio =
     guidance.profile.voice.reply.enabled &&
     (guidance.profile.voice.reply.mode === 'always' ||
       (guidance.profile.voice.reply.mode === 'on_request' && audioRequested));
   let textReply = reply;
+  const speechReply = audioAction?.text?.trim() || reply;
 
   if (shouldReplyWithAudio && canSendOpenClawMedia(payload)) {
     const speech = await synthesizeSpeechFile({
-      text: reply.slice(0, guidance.profile.voice.reply.maxChars),
+      text: speechReply.slice(0, guidance.profile.voice.reply.maxChars),
       config: config.speech,
       outputDir: config.media.outputDir
     });

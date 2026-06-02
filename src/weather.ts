@@ -775,8 +775,9 @@ export async function resolveWeatherPromptContext(input: {
   metadata?: Record<string, unknown>;
   weather: WeatherConfig;
   now?: Date;
+  force?: boolean;
 }): Promise<WeatherPromptContext | undefined> {
-  if (!isWeatherIntent(input.text)) {
+  if (!input.force && !isWeatherIntent(input.text)) {
     return undefined;
   }
 

@@ -203,7 +203,7 @@ Messages are serialized per WhatsApp target. The worker keeps recent text messag
 
 ## Stickers
 
-Sticker requests are profile-gated with `tools.stickerGeneration=true`. The worker routes sticker intent before normal image intent, uses the configured image provider, optionally includes recent inbound image references, and then converts the generated source image into a native WhatsApp sticker.
+Sticker generation is profile-gated with `tools.stickerGeneration=true`. The agent can plan a `generate_sticker` action; the worker validates delivery, uses the configured image provider, optionally includes recent inbound image references, and then converts the generated source image into a native WhatsApp sticker.
 
 The sticker prompt asks the image provider for a flat `#00ff00` chroma-key background. Conversion removes that chroma key with FFmpeg, cleans low-alpha pixels with Pillow, and saves a 512x512 lossless WebP with exact alpha so WhatsApp clients do not show chroma-key color in transparent areas.
 
@@ -228,9 +228,11 @@ For the local Codex proxy:
 - Serializes requests.
 - Runs `codex exec --ephemeral`.
 - Uses read-only sandbox by default.
-- Enables Codex `--search` only when both `CODEX_PROXY_ALLOW_WEB_SEARCH=true` and the active guidance profile has `tools.webSearch=true`.
+- Enables Codex `--search` only when both `CODEX_PROXY_ALLOW_WEB_SEARCH=true` and the active guidance profile has `tools.webSearch=true`; there is no per-message keyword gate.
 - Keeps transcription calls as explicit provider pass-throughs. Media calls are explicit too: `openai` and `custom` modes pass through to the configured provider, while `codex-cli` image generation/editing intentionally runs an ephemeral Codex CLI request and local speech intentionally runs the configured local TTS backend.
 
-`tools.localRead=true` is a profile-level permission for local inspection, not a global filesystem unlock. Actual file access is still constrained by Codex sandbox/config. Keep `CODEX_PROXY_SANDBOX=read-only` unless you intentionally want the responder to write files.
+`tools.localRead=true` is a profile-level permission for local inspection, not a global filesystem unlock. There is no per-message keyword gate; actual file access is still constrained by Codex sandbox/config. Keep `CODEX_PROXY_SANDBOX=read-only` unless you intentionally want the responder to write files.
+
+For side effects that are not native Codex CLI tools, the worker asks the responder for a structured action plan first. Planned actions such as `get_weather`, `generate_image`, `generate_sticker`, and `reply_audio` are then validated and executed by the worker.
 
 Do not expose this endpoint to the public internet.
