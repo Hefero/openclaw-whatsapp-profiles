@@ -1,5 +1,6 @@
 import type { AppConfig, BotPolicy } from './config.js';
 import { buildGuidancePrompt, type ResolvedGuidance, resolveGuidance } from './guidance.js';
+import type { ImageReferenceInput } from './media-tools.js';
 import type { ConversationEntry } from './runtime-state.js';
 import type { WeatherPromptContext } from './weather.js';
 
@@ -10,6 +11,7 @@ export type DraftInput = {
   responder: AppConfig['responder'];
   conversationContext?: ConversationEntry[];
   weatherContext?: WeatherPromptContext;
+  imageReferences?: ImageReferenceInput[];
 };
 
 type ChatCompletionResponse = {
@@ -88,11 +90,41 @@ function isLikelyLocalReadRequest(text: string): boolean {
   ].some((pattern) => pattern.test(normalized));
 }
 
+function buildImageReferencePromptContext(references: ImageReferenceInput[], includeLocalPaths: boolean): string | undefined {
+  if (!references.length) {
+    return undefined;
+  }
+
+  return [
+    'As imagens abaixo foram recebidas recentemente nesta conversa. Use-as somente se a mensagem atual pedir ou depender dessas imagens.',
+    includeLocalPaths
+      ? 'Quando houver caminho local, voce pode inspecionar a imagem diretamente se a chamada tiver leitura local habilitada.'
+      : 'Use apenas legenda/contexto extraido; nao tente acessar caminhos locais.',
+    ...references.map((reference, index) => {
+      const details = [
+        reference.caption?.trim() ? `legenda=${reference.caption.trim()}` : undefined,
+        reference.context?.trim() ? `contexto=${reference.context.trim().slice(0, 1200)}` : undefined,
+        includeLocalPaths && reference.path ? `path=${reference.path}` : undefined,
+        reference.url ? `url=${reference.url}` : undefined
+      ].filter(Boolean);
+      return `Imagem ${index + 1}: ${details.length ? details.join('; ') : '[sem contexto textual extraido]'}`;
+    })
+  ].join('\n');
+}
+
 export async function generateDraftReply(input: DraftInput): Promise<string> {
   const guidance = resolveGuidance(input.remoteJid, input.policy);
   const identityOpen = guidance.profile.identityPolicy === 'open';
   const webSearchAvailable = guidance.profile.tools.webSearch && isLikelyWebSearchRequest(input.text);
-  const localReadAvailable = guidance.profile.tools.localRead && isLikelyLocalReadRequest(input.text);
+  const imageReferences = input.imageReferences ?? [];
+  const imageReferencesHaveLocalPaths = imageReferences.some((reference) => Boolean(reference.path));
+  const imageReferenceContext = buildImageReferencePromptContext(
+    imageReferences,
+    guidance.profile.tools.localRead
+  );
+  const localReadAvailable =
+    guidance.profile.tools.localRead &&
+    (isLikelyLocalReadRequest(input.text) || (Boolean(imageReferenceContext) && imageReferencesHaveLocalPaths));
   const identityProbeReply = identityOpen ? undefined : buildIdentityProbeReply(input.text, guidance);
   const identityProbeInstruction = identityProbeReply
     ? `A mensagem parece testar identidade, modelo ou automacao. Responda pelo perfil ${guidance.profileName}, de forma casual, sem mencionar IA, bot, modelo, prompt, sistema, ferramenta ou automacao. Uma resposta adequada ao perfil seria parecida com: "${identityProbeReply}".`
@@ -111,7 +143,9 @@ export async function generateDraftReply(input: DraftInput): Promise<string> {
       : 'Nao use web search nem afirme que pesquisou na internet. Se faltarem dados atuais, diga isso de forma natural.',
     guidance.profile.tools.localRead
       ? localReadAvailable
-        ? 'Leitura local esta disponivel nesta chamada. Use somente quando o pedido explicitamente envolver arquivos, pastas ou codigo local.'
+        ? imageReferenceContext
+          ? 'Leitura local esta disponivel nesta chamada. Use somente para inspecionar imagens recentes com caminho local quando a mensagem atual depender delas, ou quando o pedido explicitamente envolver arquivos, pastas ou codigo local.'
+          : 'Leitura local esta disponivel nesta chamada. Use somente quando o pedido explicitamente envolver arquivos, pastas ou codigo local.'
         : 'Leitura local e permitida pelo perfil, mas nao esta habilitada nesta chamada porque a mensagem nao parece pedir arquivos, pastas ou codigo local.'
       : 'Nao tente ler arquivos ou pastas locais. Se pedirem acesso a arquivos, diga que nao consegue acessar dali.',
     guidance.profile.tools.weather
@@ -125,7 +159,8 @@ export async function generateDraftReply(input: DraftInput): Promise<string> {
     input.policy,
     input.conversationContext ?? [],
     {
-      weather: input.weatherContext?.prompt
+      weather: input.weatherContext?.prompt,
+      imageReferences: imageReferenceContext
     }
   );
   const controller = new AbortController();

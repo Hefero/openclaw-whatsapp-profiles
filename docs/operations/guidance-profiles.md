@@ -157,6 +157,8 @@ For local testing without an image API key, use `CODEX_PROXY_MEDIA_PROVIDER=code
 
 When a chat sends one or more images and later asks for an image or figurinha "com base nessas fotos", "dessa pessoa", "disso", or similar, the worker sends up to `MEDIA_REFERENCE_MAX_IMAGES` recent inbound image files to `/v1/images/edits`. In direct API mode, use an image model that supports edits/reference images. In `codex-cli` mode, the proxy saves the uploaded references temporarily and asks Codex to generate the final PNG from those local paths.
 
+The worker processes inbound messages sequentially per WhatsApp target so an audio/text follow-up cannot run before a prior image in the same conversation is recorded. Recent text messages, voice transcripts, and inbound image references are kept as structured conversation context. Later text or voice replies receive those recent image references automatically; with `tools.localRead=true`, Codex can inspect the local image paths.
+
 Inbound image understanding/OCR is configured separately from generation. Direct API mode:
 
 ```text
@@ -164,7 +166,7 @@ IMAGE_UNDERSTANDING_PROVIDER=openai
 IMAGE_UNDERSTANDING_BASE_URL=https://api.openai.com/v1
 IMAGE_UNDERSTANDING_API_KEY=your-openai-api-key
 IMAGE_UNDERSTANDING_MODEL=gpt-4o-mini
-IMAGE_UNDERSTANDING_TIMEOUT_MS=120000
+IMAGE_UNDERSTANDING_TIMEOUT_MS=300000
 ```
 
 Local Codex CLI mode reads the WhatsApp image from its local `mediaPath`:

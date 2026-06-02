@@ -199,6 +199,8 @@ MEDIA_REFERENCE_MAX_AGE_MINUTES=120
 MEDIA_REFERENCE_MAX_IMAGE_BYTES=20971520
 ```
 
+Messages are serialized per WhatsApp target. The worker keeps recent text messages, voice transcripts, and inbound image references as structured conversation context, so later text or voice prompts can depend on images sent earlier in the same chat. In `codex-cli` mode, keep `IMAGE_UNDERSTANDING_TIMEOUT_MS` aligned with media timeouts or leave it unset so it inherits `CODEX_PROXY_MEDIA_TIMEOUT_MS`.
+
 ## Stickers
 
 Sticker requests are profile-gated with `tools.stickerGeneration=true`. The worker routes sticker intent before normal image intent, uses the configured image provider, optionally includes recent inbound image references, and then converts the generated source image into a native WhatsApp sticker.

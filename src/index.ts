@@ -98,6 +98,7 @@ const workerProcessArgs = (process.env.WORKER_PROCESS_ARGS ?? 'run openclaw:work
 const workerPidPath = path.resolve('data', 'runtime', `${workerProcessName}.pid.json`);
 const logReplyContent = process.env.BOT_LOG_REPLY_CONTENT === 'true';
 let retroactiveReplyScanInFlight = false;
+const inboundQueues = new Map<string, Promise<unknown>>();
 
 function registerWorkerProcess(): void {
   const runtimeDir = path.dirname(workerPidPath);
@@ -706,6 +707,43 @@ function imageReferencesForRequest(
   }));
 }
 
+function recentImageReferencesForPrompt(
+  state: ReturnType<typeof loadRuntimeState>,
+  message: InboundMessage,
+  config: AppConfig
+): ImageReferenceInput[] {
+  return getRecentImageReferences(state, message.remoteJid, {
+    maxImages: config.media.referenceMaxImages,
+    maxAgeMinutes: config.media.referenceMaxAgeMinutes
+  }).map((reference) => ({
+    path: reference.path,
+    url: reference.url,
+    type: reference.type,
+    fileName: reference.fileName,
+    caption: reference.caption,
+    context: reference.context
+  }));
+}
+
+function inboundQueueKey(payload: InboundPayload): string {
+  const config = loadConfig();
+  const target = findTarget(payload, config);
+  return resolveRemoteJid(payload, target) ?? payload.sessionKey ?? payload.context?.from ?? 'unknown';
+}
+
+function enqueueInboundByTarget(payload: InboundPayload): Promise<unknown> {
+  const key = inboundQueueKey(payload);
+  const previous = inboundQueues.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => handleInbound(payload));
+  const tracked = next.finally(() => {
+    if (inboundQueues.get(key) === tracked) {
+      inboundQueues.delete(key);
+    }
+  });
+  inboundQueues.set(key, tracked);
+  return next;
+}
+
 function resolveTypingPolicyForInbound(payload: InboundPayload): TypingPolicyResult {
   const config = loadConfig();
 
@@ -860,6 +898,26 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     return { ok: true, action: decision.action, reasons: decision.reasons };
   }
 
+  const seedGuidance = resolveGuidance(seed.remoteJid, config.policy);
+  if (target && isLikelyImageMedia(seed.media) && seedGuidance.profile.tools.imageUnderstanding) {
+    rememberImageReference(state, seed.remoteJid, {
+      id: seed.id,
+      path: seed.media?.path,
+      url: seed.media?.url,
+      type: seed.media?.type,
+      fileName: seed.media?.fileName,
+      caption: seed.text
+    });
+    saveRuntimeState(state);
+    logger.info(
+      {
+        target: targetLabel,
+        messageId: seed.id
+      },
+      'recorded inbound image reference before vision pass'
+    );
+  }
+
   const resolvedMessage = await resolveMessageFromSeed(seed, config);
   const normalizedAt = Date.now();
   if ('ignored' in resolvedMessage) {
@@ -904,6 +962,7 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
   const weatherFinishedAt = Date.now();
   const stickerRequest = isLikelyStickerGenerationRequest(message.text);
   const imageRequest = isLikelyImageGenerationRequest(message.text);
+  const availableImageReferences = recentImageReferencesForPrompt(state, message, config);
   const imageReferences =
     stickerRequest || imageRequest ? imageReferencesForRequest(state, message, config) : [];
 
@@ -916,7 +975,8 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
       textChars: message.text.length,
       stickerRequest,
       imageRequest,
-      imageReferenceCount: imageReferences.length,
+      imageReferenceCount: availableImageReferences.length,
+      generationImageReferenceCount: imageReferences.length,
       imageUnderstandingProvider: message.inputKind === 'media' ? config.imageUnderstanding.provider : undefined,
       weatherFollowup: weatherLookupText !== message.text,
       weatherStatus: weatherContext?.status,
@@ -1276,7 +1336,8 @@ async function handleInbound(payload: InboundPayload): Promise<unknown> {
     policy: config.policy,
     responder: config.responder,
     conversationContext,
-    weatherContext
+    weatherContext,
+    imageReferences: availableImageReferences
   });
   const responderFinishedAt = Date.now();
 
@@ -1461,7 +1522,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       const payload = (await readJson(request)) as InboundPayload;
-      sendJson(response, 200, await handleInbound(payload));
+      sendJson(response, 200, await enqueueInboundByTarget(payload));
       return;
     }
 

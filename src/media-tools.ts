@@ -64,6 +64,7 @@ export function isLikelyImageReferenceRequest(text: string): boolean {
     /\b(com base|a partir|usando|usa|use|usar|baseado|baseada|referencia|referencias)\b.*\b(imagem|imagens|foto|fotos|anexo|anexos|referencia|referencias)\b/u,
     /\b(essa|essas|esse|esses|esta|estas|este|estes|dessa|dessas|desse|desses|desta|destas|deste|destes|nela|nelas|nele|neles|isso|isto|aquilo|aquelas|aqueles|ultimas|anteriores|acima|mandei|enviei)\b.*\b(imagem|imagens|foto|fotos|pessoa|rosto|design|referencia|referencias)\b/u,
     /\b(imagem|imagens|foto|fotos|referencia|referencias)\b.*\b(essa|essas|esse|esses|dessa|dessas|desse|desses|mandei|enviei|acima|anterior|anteriores|use|usar|base)\b/u,
+    /\b(da|do|das|dos|dessa|dessas|desse|desses|desta|destas|deste|destes|com a|com as|usando a|usando as)\s+(imagem|imagens|foto|fotos|pessoa|rosto|design)\b/u,
     /\b(dessa pessoa|desse rosto|desse design|desse estilo|dessas pessoas|dessas fotos|dessas imagens|todas essas|todos esses)\b/u
   ].some((pattern) => pattern.test(normalized));
 }
@@ -75,8 +76,8 @@ export function isLikelyStickerGenerationRequest(text: string): boolean {
   }
 
   return [
-    /\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|manda|mande|envia|envie|transforma|transforme)\b.*\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b/u,
-    /\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b.*\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|manda|mande|envia|envie|transforma|transforme)\b/u,
+    /\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|manda|mande|envia|envie|passa|passe|passar|transforma|transforme)\b.*\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b/u,
+    /\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b.*\b(cri|cria|crie|criar|gera|gere|gerar|faz|faca|manda|mande|envia|envie|passa|passe|passar|transforma|transforme)\b/u,
     /\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b\s+(?:de|do|da|dos|das|com|em|no|na|num|numa|estilo|tipo|formato|pronta|pronto|pra|para|fundo|transparente)\b/u,
     /\b(?:fundo transparente|sem fundo|chroma key|chroma)\b.*\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b/u,
     /\b(figurinha|figurinhas|sticker|stickers|adesivo|adesivos)\b.*\b(?:fundo transparente|sem fundo|chroma key|chroma|pronta pra|pronto pra|pronta para|pronto para)\b/u

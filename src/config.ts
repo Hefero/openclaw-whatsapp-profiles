@@ -264,6 +264,12 @@ export function loadConfig(): AppConfig {
       process.env.IMAGE_UNDERSTANDING_PROVIDER ??
         (codexProxyEnabled && proxyMediaProvider === 'codex-cli' ? 'codex-cli' : 'openai')
     );
+  const imageUnderstandingTimeoutMs = Number(
+    process.env.IMAGE_UNDERSTANDING_TIMEOUT_MS ??
+      (imageUnderstandingProvider === 'codex-cli'
+        ? process.env.CODEX_PROXY_MEDIA_TIMEOUT_MS ?? process.env.CODEX_PROXY_TIMEOUT_MS ?? '300000'
+        : '120000')
+  );
   const weatherCountryCode = process.env.WEATHER_GEOCODING_COUNTRY_CODE?.trim().toUpperCase();
 
   return {
@@ -327,7 +333,7 @@ export function loadConfig(): AppConfig {
         (imageUnderstandingProvider === 'codex-cli'
           ? process.env.CODEX_PROXY_MEDIA_CODEX_MODEL ?? process.env.CODEX_PROXY_MODEL ?? 'gpt-5.4-mini'
           : 'gpt-4o-mini'),
-      timeoutMs: Number(process.env.IMAGE_UNDERSTANDING_TIMEOUT_MS ?? '120000'),
+      timeoutMs: imageUnderstandingTimeoutMs,
       maxImageBytes: Number(process.env.IMAGE_UNDERSTANDING_MAX_IMAGE_BYTES ?? String(10 * 1024 * 1024)),
       detail: z.enum(['auto', 'low', 'high']).parse(process.env.IMAGE_UNDERSTANDING_DETAIL ?? 'auto'),
       codexBin: process.env.IMAGE_UNDERSTANDING_CODEX_BIN ?? process.env.CODEX_PROXY_CODEX_BIN ?? (process.platform === 'win32' ? 'codex.cmd' : 'codex'),
